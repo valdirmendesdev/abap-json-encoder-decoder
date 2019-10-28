@@ -80,8 +80,18 @@ CLASS ltcl_json_encode IMPLEMENTATION.
     check_scenario( options = options val = value_timestamp       exp = '"2019-10-23T14:55:08"' ).
 
     "Empty values
-    FREE: value_int.
-    check_scenario( options = options val = value_int exp = '' ).
+    FREE: value_string,
+          value_int,
+          value_conversion_exit,
+          value_date,
+          value_time,
+          value_timestamp.
+    check_scenario( options = options val = value_string          exp = '' ).
+    check_scenario( options = options val = value_int             exp = '' ).
+    check_scenario( options = options val = value_conversion_exit exp = '' ).
+    check_scenario( options = options val = value_date            exp = '' ).
+    check_scenario( options = options val = value_time            exp = '' ).
+    check_scenario( options = options val = value_timestamp       exp = '' ).
 
   ENDMETHOD.
 
