@@ -7,12 +7,17 @@ CLASS zcl_json_encoder_decoder DEFINITION
 
     TYPES:
       BEGIN OF options,
-        use_conversion_exit TYPE abap_bool,
-        camelcase           TYPE abap_bool,
-        keep_empty_values   TYPE abap_bool,
+        use_conversion_exit   TYPE abap_bool,
+        camelcase             TYPE abap_bool,
+        keep_empty_values     TYPE abap_bool,
+        use_objs_methods      TYPE abap_bool,
+        use_public_attributes TYPE abap_bool,
       END OF options.
 
     METHODS:
+
+      constructor,
+
       encode
         IMPORTING
           value         TYPE any
@@ -24,6 +29,8 @@ CLASS zcl_json_encoder_decoder DEFINITION
   PRIVATE SECTION.
 
     CONSTANTS c_boolean_types TYPE string VALUE '\TYPE-POOL=ABAP\TYPE=ABAP_BOOL#\TYPE=BOOLEAN#\TYPE=BOOLE_D#\TYPE=XFELD'.
+
+    DATA: patterns TYPE STANDARD TABLE OF REF TO cl_abap_regex.
 
     METHODS:
       encode_value
@@ -87,7 +94,7 @@ CLASS zcl_json_encoder_decoder DEFINITION
           result  TYPE string,
       handle_case
         IMPORTING
-          value         TYPE abap_compname
+          value         TYPE clike
           options       TYPE zcl_json_encoder_decoder=>options
         RETURNING
           VALUE(result) TYPE string,
@@ -107,7 +114,34 @@ CLASS zcl_json_encoder_decoder DEFINITION
         IMPORTING value         TYPE any
                   options       TYPE zcl_json_encoder_decoder=>options
         RETURNING
-                  VALUE(result) TYPE abap_bool.
+                  VALUE(result) TYPE abap_bool,
+      encode_object
+        IMPORTING
+          value   TYPE any
+          options TYPE zcl_json_encoder_decoder=>options
+          type    TYPE REF TO cl_abap_typedescr
+        CHANGING
+          result  TYPE string,
+      encode_object_by_methods
+        IMPORTING
+          value   TYPE any
+          options TYPE zcl_json_encoder_decoder=>options
+          type    TYPE REF TO cl_abap_typedescr
+        CHANGING
+          result  TYPE string,
+      encode_obj_public_attributes
+        IMPORTING
+          value   TYPE any
+          options TYPE zcl_json_encoder_decoder=>options
+          type    TYPE REF TO cl_abap_typedescr
+        CHANGING
+          result  TYPE string,
+      get_attribute_by_method
+        IMPORTING
+          value         TYPE clike
+          options       TYPE zcl_json_encoder_decoder=>options
+        RETURNING
+          VALUE(result) TYPE string.
 
 ENDCLASS.
 
@@ -133,7 +167,14 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
 
     CASE reftype->type_kind.
       WHEN  cl_abap_typedescr=>typekind_oref.
-
+        encode_object(
+          EXPORTING
+            value = value
+            options = options
+            type    = reftype
+          CHANGING
+            result = result
+        ).
       WHEN  cl_abap_typedescr=>typekind_struct1 OR
             cl_abap_typedescr=>typekind_struct2.
         encode_struct(
@@ -527,6 +568,254 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
       RETURN.
     ENDIF.
     result = abap_true.
+  ENDMETHOD.
+
+
+  METHOD encode_object.
+
+    encode_object_by_methods(
+          EXPORTING
+            value = value
+            options = options
+            type    = type
+          CHANGING
+            result = result
+        ).
+
+    encode_obj_public_attributes(
+      EXPORTING
+        value = value
+        options = options
+        type    = type
+      CHANGING
+        result = result
+    ).
+
+  ENDMETHOD.
+
+
+  METHOD encode_object_by_methods.
+
+    IF options-use_objs_methods EQ abap_false.
+      RETURN.
+    ENDIF.
+
+    DATA: reftype        TYPE REF TO cl_abap_refdescr,
+          objtype        TYPE REF TO cl_abap_objectdescr,
+          type_descr     TYPE REF TO cl_abap_typedescr,
+          ref_value      TYPE REF TO data,
+          lt_methods     TYPE abap_methdescr_tab,
+          lw_param       TYPE abap_parmbind,
+          lt_params      TYPE abap_parmbind_tab,
+          o_obj          TYPE REF TO object,
+          json_fieldname TYPE string,
+          json_value     TYPE string,
+          next           TYPE string.
+
+    FIELD-SYMBOLS: <method_descr>    TYPE abap_methdescr,
+                   <param_descr>     TYPE abap_parmdescr,
+                   <attribute_descr> LIKE LINE OF objtype->attributes,
+                   <attribute>       TYPE any.
+
+    o_obj = value.
+    reftype ?= type.
+    objtype ?= reftype->get_referenced_type( ).
+
+    lt_methods = objtype->methods.
+    DELETE lt_methods WHERE visibility NE cl_abap_objectdescr=>public.
+
+    next = '{'.
+    LOOP AT lt_methods ASSIGNING <method_descr>.
+
+      IF lines( <method_descr>-parameters ) > 1.
+        CONTINUE.
+      ENDIF.
+
+      READ TABLE <method_descr>-parameters
+        ASSIGNING <param_descr> INDEX 1.
+
+      CHECK <param_descr>-parm_kind EQ cl_abap_objectdescr=>returning.
+
+      type_descr ?= objtype->get_method_parameter_type(
+                 p_method_name       = <method_descr>-name
+                 p_parameter_name    = <param_descr>-name
+             ).
+
+      CASE type_descr->kind.
+        WHEN cl_abap_typedescr=>kind_elem.
+
+          DATA: elem_descr TYPE REF TO cl_abap_elemdescr.
+
+          elem_descr ?= type_descr.
+
+          CREATE DATA ref_value TYPE HANDLE elem_descr.
+
+        WHEN cl_abap_typedescr=>kind_struct.
+        WHEN cl_abap_typedescr=>kind_table.
+
+      ENDCASE.
+
+      ASSIGN ref_value->* TO <attribute>.
+
+      lw_param-name = <param_descr>-name.
+      lw_param-kind = cl_abap_objectdescr=>receiving.
+      lw_param-value = ref_value.
+      INSERT lw_param INTO TABLE lt_params.
+
+      CALL METHOD o_obj->(<method_descr>-name)
+        PARAMETER-TABLE
+        lt_params.
+
+      encode_value(
+        EXPORTING
+          value   = <attribute>
+          options = options
+        CHANGING
+          result  = json_value
+      ).
+
+      json_fieldname = get_attribute_by_method(
+                        value   = <method_descr>-name
+                        options = options ).
+
+      IF json_value IS NOT INITIAL.
+        CONCATENATE result next '"' json_fieldname '":' json_value INTO result.
+        next = ','.
+      ENDIF.
+
+      FREE: lt_params,
+            json_value.
+
+    ENDLOOP.
+
+    IF next EQ '{'.
+      CONCATENATE result '{}' INTO result.
+    ELSE.
+      CONCATENATE result '}' INTO result.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD encode_obj_public_attributes.
+
+    IF options-use_public_attributes EQ abap_false.
+      RETURN.
+    ENDIF.
+
+    DATA: ref             TYPE REF TO cl_abap_refdescr,
+          obj             TYPE REF TO cl_abap_objectdescr,
+          attributes_json TYPE TABLE OF string,
+          attribute_name  TYPE string,
+          json_line       TYPE string,
+          json_fieldname  TYPE string,
+          json_value      TYPE string,
+          next            TYPE string.
+
+    FIELD-SYMBOLS: <attribute_descr> LIKE LINE OF obj->attributes,
+                   <attribute>       TYPE any.
+
+    "// Encode all obj attributes
+    ref ?= type.
+    obj ?= ref->get_referenced_type( ).
+
+    next = '{'.
+    LOOP AT obj->attributes ASSIGNING <attribute_descr>
+        WHERE visibility = cl_abap_classdescr=>public.
+
+      CONCATENATE 'value->' <attribute_descr>-name INTO attribute_name.
+
+      ASSIGN (attribute_name) TO <attribute>.
+
+      IF sy-subrc NE 0.
+        CONTINUE.
+      ENDIF.
+
+      encode_value(
+        EXPORTING
+          value   = <attribute>
+          options = options
+        CHANGING
+          result  = json_value
+      ).
+
+      json_fieldname = handle_case(
+                        value   = <attribute_descr>-name
+                        options = options ).
+
+      IF json_value IS NOT INITIAL.
+        CONCATENATE result next '"' json_fieldname '":' json_value INTO result.
+        next = ','.
+      ENDIF.
+
+    ENDLOOP.
+
+    IF next EQ '{'.
+      CONCATENATE result '{}' INTO result.
+    ELSE.
+      CONCATENATE result '}' INTO result.
+    ENDIF.
+
+
+  ENDMETHOD.
+
+
+  METHOD get_attribute_by_method.
+
+    DATA: result_tab TYPE match_result_tab,
+          lo_regex   TYPE REF TO cl_abap_regex.
+
+    FIELD-SYMBOLS: <result_regex> LIKE LINE OF result_tab,
+                   <submatch>     LIKE LINE OF <result_regex>-submatches.
+
+    result = value.
+
+    LOOP AT patterns INTO lo_regex.
+
+      FIND FIRST OCCURRENCE OF REGEX lo_regex
+        IN value
+        RESULTS result_tab.
+
+      IF sy-subrc NE 0.
+        CONTINUE.
+      ENDIF.
+
+      CLEAR: result.
+
+      LOOP AT result_tab ASSIGNING <result_regex>.
+
+        LOOP AT <result_regex>-submatches ASSIGNING <submatch>.
+
+          CONCATENATE result
+                      value+<submatch>-offset(<submatch>-length)
+                 INTO result.
+
+        ENDLOOP.
+
+      ENDLOOP.
+
+      result = handle_case( value   = result
+                            options = options ).
+
+      RETURN.
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD constructor.
+
+    DATA: lo_regex   TYPE REF TO cl_abap_regex.
+
+    CREATE OBJECT lo_regex
+      EXPORTING
+        pattern     = 'get_(\w*)'
+        ignore_case = abap_true
+*       simple_regex  = ABAP_FALSE
+*       no_submatches = ABAP_FALSE
+      .
+    APPEND lo_regex TO me->patterns.
+
   ENDMETHOD.
 
 ENDCLASS.

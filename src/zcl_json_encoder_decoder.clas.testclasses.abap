@@ -1,4 +1,54 @@
 *"* use this source file for your ABAP unit test classes
+
+CLASS lcl_obj_to_json DEFINITION.
+
+  PUBLIC SECTION.
+
+    DATA: public_name TYPE string.
+
+    METHODS:
+      get_name
+        RETURNING VALUE(result) TYPE string,
+
+      set_name
+        IMPORTING name TYPE string,
+
+      set_age
+        IMPORTING age TYPE i.
+
+  PROTECTED SECTION.
+
+    METHODS:
+      get_age
+        RETURNING VALUE(result) TYPE i.
+
+  PRIVATE SECTION.
+
+    DATA: name TYPE string,
+          age  TYPE i.
+
+ENDCLASS.
+
+CLASS lcl_obj_to_json IMPLEMENTATION.
+
+  METHOD get_name.
+    result = me->name.
+  ENDMETHOD.
+
+  METHOD get_age.
+    result = me->age.
+  ENDMETHOD.
+
+  METHOD set_name.
+    me->name = name.
+  ENDMETHOD.
+
+  METHOD set_age.
+    me->age = age.
+  ENDMETHOD.
+
+ENDCLASS.
+
 CLASS ltcl_json_encode DEFINITION FINAL FOR TESTING
   DURATION SHORT
   RISK LEVEL HARMLESS.
@@ -32,7 +82,9 @@ CLASS ltcl_json_encode DEFINITION FINAL FOR TESTING
       struct_keeping_empty_values       FOR TESTING,
       struct_empty                      FOR TESTING,
       internal_table                    FOR TESTING,
-      empty_internal_table              FOR TESTING.
+      empty_internal_table              FOR TESTING,
+      obj_by_methods                    FOR TESTING,
+      obj_by_attributes                 FOR TESTING.
 
 ENDCLASS.
 
@@ -259,6 +311,38 @@ CLASS ltcl_json_encode IMPLEMENTATION.
     options-keep_empty_values = abap_false.
     json_result = '[]'.
     check_scenario( options = options val = lw_range exp  = json_result ).
+  ENDMETHOD.
+
+  METHOD obj_by_methods.
+
+    DATA: lo_obj_to_json TYPE REF TO lcl_obj_to_json,
+          json_result    TYPE string.
+
+    options-camelcase = abap_true.
+    options-use_objs_methods = abap_true.
+
+    CREATE OBJECT lo_obj_to_json.
+    lo_obj_to_json->set_name( 'test' ).
+
+    json_result = '{"name":"test"}'.
+    check_scenario( options = options val = lo_obj_to_json exp  = json_result ).
+
+  ENDMETHOD.
+
+  METHOD obj_by_attributes.
+
+    DATA: lo_obj_to_json TYPE REF TO lcl_obj_to_json,
+          json_result    TYPE string.
+
+    options-camelcase               = abap_true.
+    options-use_public_attributes   = abap_true.
+
+    CREATE OBJECT lo_obj_to_json.
+    lo_obj_to_json->public_name = 'test'.
+
+    json_result = '{"publicName":"test"}'.
+    check_scenario( options = options val = lo_obj_to_json exp = json_result ).
+
   ENDMETHOD.
 
 ENDCLASS.
