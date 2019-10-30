@@ -23,12 +23,35 @@ CLASS zcl_json_encoder_decoder DEFINITION
           value         TYPE any
           options       TYPE zcl_json_encoder_decoder=>options
         RETURNING
-          VALUE(result) TYPE string .
+          VALUE(result) TYPE string,
+
+      decode
+        IMPORTING json_string TYPE clike
+        CHANGING  value       TYPE any.
 
   PROTECTED SECTION.
   PRIVATE SECTION.
 
     CONSTANTS c_boolean_types TYPE string VALUE '\TYPE-POOL=ABAP\TYPE=ABAP_BOOL#\TYPE=BOOLEAN#\TYPE=BOOLE_D#\TYPE=XFELD'.
+
+    CONSTANTS:
+      BEGIN OF json_element_type,
+        object       TYPE char1 VALUE 'o',
+        array        TYPE char1 VALUE 'r',
+        attribute    TYPE char1 VALUE 'a',
+        value_string TYPE char1 VALUE 's',
+        value_true   TYPE char1 VALUE 't',
+        value_false  TYPE char1 VALUE 'f',
+      END OF json_element_type.
+
+    TYPES:
+      BEGIN OF json_element,
+        type     TYPE char1,
+        value    TYPE string,
+        children TYPE REF TO data,
+      END OF json_element,
+
+      t_json_element TYPE STANDARD TABLE OF json_element.
 
     DATA: patterns TYPE STANDARD TABLE OF REF TO cl_abap_regex.
 
@@ -141,7 +164,46 @@ CLASS zcl_json_encoder_decoder DEFINITION
           value         TYPE clike
           options       TYPE zcl_json_encoder_decoder=>options
         RETURNING
-          VALUE(result) TYPE string.
+          VALUE(result) TYPE string,
+      decode_element
+        IMPORTING
+          json         TYPE string
+          position     TYPE i
+        EXPORTING
+          json_element TYPE zcl_json_encoder_decoder=>json_element
+          new_position TYPE i,
+      decode_object
+        IMPORTING
+          json         TYPE string
+          position     TYPE i
+        EXPORTING
+          json_element TYPE zcl_json_encoder_decoder=>json_element
+          new_position TYPE i,
+      create_element_json
+        RETURNING
+          VALUE(result) TYPE zcl_json_encoder_decoder=>json_element,
+      decode_string_value
+        IMPORTING
+          json         TYPE string
+          position     TYPE i
+        EXPORTING
+          json_element TYPE zcl_json_encoder_decoder=>json_element
+          new_position TYPE i,
+      transport_values
+        EXPORTING
+          json_element TYPE zcl_json_encoder_decoder=>json_element
+        CHANGING
+          value        TYPE any,
+      transfer_values_struct
+        IMPORTING
+          json_element TYPE zcl_json_encoder_decoder=>json_element
+        CHANGING
+          value        TYPE any,
+      transport_value_string
+        IMPORTING
+          json_element TYPE zcl_json_encoder_decoder=>json_element
+        CHANGING
+          value        TYPE any.
 
 ENDCLASS.
 
@@ -458,7 +520,6 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
     struct ?= type.
 
     next = '{'.
-
     LOOP AT struct->components ASSIGNING <component>.
       ASSIGN COMPONENT <component>-name OF STRUCTURE value
         TO <field>.
@@ -596,9 +657,7 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
 
   METHOD encode_object_by_methods.
 
-    IF options-use_objs_methods EQ abap_false.
-      RETURN.
-    ENDIF.
+    IF options-use_objs_methods EQ abap_false. RETURN. ENDIF.
 
     DATA: reftype        TYPE REF TO cl_abap_refdescr,
           objtype        TYPE REF TO cl_abap_objectdescr,
@@ -612,10 +671,9 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
           json_value     TYPE string,
           next           TYPE string.
 
-    FIELD-SYMBOLS: <method_descr>    TYPE abap_methdescr,
-                   <param_descr>     TYPE abap_parmdescr,
-                   <attribute_descr> LIKE LINE OF objtype->attributes,
-                   <attribute>       TYPE any.
+    FIELD-SYMBOLS: <method_descr> TYPE abap_methdescr,
+                   <param_descr>  TYPE abap_parmdescr,
+                   <attribute>    TYPE any.
 
     o_obj = value.
     reftype ?= type.
@@ -699,18 +757,14 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
 
   METHOD encode_obj_public_attributes.
 
-    IF options-use_public_attributes EQ abap_false.
-      RETURN.
-    ENDIF.
+    IF options-use_public_attributes EQ abap_false. RETURN. ENDIF.
 
-    DATA: ref             TYPE REF TO cl_abap_refdescr,
-          obj             TYPE REF TO cl_abap_objectdescr,
-          attributes_json TYPE TABLE OF string,
-          attribute_name  TYPE string,
-          json_line       TYPE string,
-          json_fieldname  TYPE string,
-          json_value      TYPE string,
-          next            TYPE string.
+    DATA: ref            TYPE REF TO cl_abap_refdescr,
+          obj            TYPE REF TO cl_abap_objectdescr,
+          attribute_name TYPE string,
+          json_fieldname TYPE string,
+          json_value     TYPE string,
+          next           TYPE string.
 
     FIELD-SYMBOLS: <attribute_descr> LIKE LINE OF obj->attributes,
                    <attribute>       TYPE any.
@@ -755,7 +809,6 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
     ELSE.
       CONCATENATE result '}' INTO result.
     ENDIF.
-
 
   ENDMETHOD.
 
@@ -815,6 +868,207 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
 *       no_submatches = ABAP_FALSE
       .
     APPEND lo_regex TO me->patterns.
+
+  ENDMETHOD.
+
+  METHOD decode.
+
+    DATA: condensed_string TYPE string,
+          lw_decoded       TYPE json_element.
+
+    condensed_string = json_string.
+    CONDENSE condensed_string.
+
+    decode_element(
+        EXPORTING
+            json     = condensed_string
+            position = 0
+        IMPORTING
+            json_element = lw_decoded ).
+
+    transport_values(
+       IMPORTING
+           json_element = lw_decoded
+       CHANGING value = value
+    ).
+
+  ENDMETHOD.
+
+
+  METHOD decode_element.
+
+    DATA: lv_new_position TYPE i.
+
+    FIELD-SYMBOLS: <children> TYPE t_json_element.
+
+    json_element = create_element_json( ).
+    ASSIGN json_element-children->* TO <children>.
+
+    CASE json+position(1).
+      WHEN '{'.
+        lv_new_position = position + 1.
+        decode_object(
+          EXPORTING
+            json         = json
+            position     = lv_new_position
+          IMPORTING
+            json_element = json_element
+            new_position = new_position
+        ).
+      WHEN '"'.
+        decode_string_value(
+          EXPORTING
+            json         = json
+            position     = position
+          IMPORTING
+            json_element = json_element
+            new_position = new_position
+        ).
+    ENDCASE.
+
+  ENDMETHOD.
+
+
+  METHOD decode_object.
+
+    DATA: lv_position             TYPE i,
+          lv_property_name_length TYPE i,
+          lv_property_name        TYPE string,
+          lw_json_element         TYPE json_element.
+
+    FIELD-SYMBOLS: <children>       TYPE t_json_element,
+                   <child_children> TYPE t_json_element,
+                   <element>        TYPE json_element.
+
+    json_element = create_element_json( ).
+    ASSIGN json_element-children->* TO <children>.
+    json_element-type = zcl_json_encoder_decoder=>json_element_type-object.
+
+    lv_position = position.
+
+    DO.
+
+      CASE json+lv_position(1).
+        WHEN '}'.
+          new_position = lv_position + 1.
+          EXIT.
+        WHEN ','.
+          lv_position = lv_position + 1.
+      ENDCASE.
+
+      FIND REGEX '\A\s*"([^:]*)"\s*:' IN SECTION OFFSET lv_position OF json
+                        MATCH OFFSET lv_position MATCH LENGTH lv_property_name_length
+                        SUBMATCHES lv_property_name.
+
+      IF sy-subrc NE 0.
+
+      ENDIF.
+
+      lv_position = lv_position + lv_property_name_length.
+
+      lw_json_element = create_element_json( ).
+      lw_json_element-type = zcl_json_encoder_decoder=>json_element_type-attribute.
+      lw_json_element-value = lv_property_name.
+
+      APPEND lw_json_element TO <children> ASSIGNING <element>.
+
+      decode_element(
+          EXPORTING
+            json         = json
+            position     = lv_position
+          IMPORTING
+            json_element = lw_json_element
+            new_position = lv_position
+        ).
+
+      ASSIGN <element>-children->* TO <child_children>.
+      APPEND lw_json_element TO <child_children>.
+      new_position = lv_position.
+
+    ENDDO.
+
+  ENDMETHOD.
+
+
+  METHOD create_element_json.
+    CREATE DATA result-children TYPE t_json_element.
+  ENDMETHOD.
+
+
+  METHOD decode_string_value.
+
+    DATA: lv_value_lenght TYPE i.
+
+    json_element-type = zcl_json_encoder_decoder=>json_element_type-value_string.
+
+    FIND REGEX '"([^"]*)"' IN SECTION OFFSET position OF json
+        MATCH OFFSET new_position MATCH LENGTH lv_value_lenght
+        SUBMATCHES json_element-value.
+
+    new_position = position + lv_value_lenght.
+  ENDMETHOD.
+
+
+  METHOD transport_values.
+
+    DATA: reftype TYPE REF TO cl_abap_typedescr.
+
+    reftype = cl_abap_typedescr=>describe_by_data( value ).
+
+    CASE reftype->kind.
+      WHEN cl_abap_typedescr=>kind_struct.
+        transfer_values_struct(
+          EXPORTING
+            json_element = json_element
+          CHANGING value = value
+        ).
+
+    ENDCASE.
+
+  ENDMETHOD.
+
+
+  METHOD transfer_values_struct.
+
+    IF json_element-type NE json_element_type-object. RETURN. ENDIF.
+
+    FIELD-SYMBOLS: <children> TYPE t_json_element,
+                   <child>    TYPE json_element,
+                   <field>    TYPE any.
+
+    ASSIGN json_element-children->* TO <children>.
+
+    LOOP AT <children> ASSIGNING <child>.
+
+      CASE <child>-type.
+        WHEN json_element_type-attribute.
+
+          ASSIGN COMPONENT <child>-value OF STRUCTURE value TO <field>.
+          IF sy-subrc NE 0.
+            CONTINUE.
+          ENDIF.
+
+          transport_value_string(
+            EXPORTING json_element = <child>
+            CHANGING value = <field>
+           ).
+      ENDCASE.
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD transport_value_string.
+
+    FIELD-SYMBOLS: <children> TYPE t_json_element,
+                   <child>    TYPE json_element.
+
+    ASSIGN json_element-children->* TO <children>.
+
+    READ TABLE <children> ASSIGNING <child> INDEX 1.
+
+    value = <child>-value.
 
   ENDMETHOD.
 

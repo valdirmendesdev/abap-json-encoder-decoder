@@ -346,3 +346,77 @@ CLASS ltcl_json_encode IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+CLASS ltcl_json_decode DEFINITION FINAL FOR TESTING
+  DURATION SHORT
+  RISK LEVEL HARMLESS.
+
+  PRIVATE SECTION.
+
+    DATA: o_cut   TYPE REF TO zcl_json_encoder_decoder,
+          options TYPE zcl_json_encoder_decoder=>options.
+
+    METHODS:
+      setup,
+
+      check_scenario
+        IMPORTING
+          json     TYPE clike
+          expected TYPE any
+        CHANGING
+          actual   TYPE any.
+
+    METHODS:
+      range_struct                        FOR TESTING.
+
+ENDCLASS.
+
+CLASS ltcl_json_decode IMPLEMENTATION.
+
+  METHOD setup.
+    CREATE OBJECT o_cut.
+  ENDMETHOD.
+
+  METHOD range_struct.
+
+    DATA: lw_actual   TYPE ace_generic_range,
+          lw_expected TYPE ace_generic_range.
+
+    lw_expected-sign    = 'I'.
+    lw_expected-option  = 'EQ'.
+    lw_expected-low     = '0010'.
+
+    check_scenario( EXPORTING
+                        json = '{"sign":"I","option":"EQ","low":"0010","high":""}'
+                        expected = lw_expected
+                    CHANGING
+                        actual   = lw_actual ).
+
+  ENDMETHOD.
+
+
+  METHOD check_scenario.
+
+    o_cut->decode(
+      EXPORTING
+        json_string = json
+      CHANGING
+        value       = actual
+    ).
+
+    cl_abap_unit_assert=>assert_equals(
+      EXPORTING
+        act                  = actual
+        exp                  = expected
+*        ignore_hash_sequence = ABAP_FALSE
+*        tol                  =
+*        msg                  =
+*        level                =
+*        quit                 =
+*      RECEIVING
+*        assertion_failed     =
+    ).
+
+  ENDMETHOD.
+
+ENDCLASS.
