@@ -13,19 +13,19 @@ CLASS lcl_obj_to_json DEFINITION.
       set_name
         IMPORTING name TYPE string,
 
-      set_age
-        IMPORTING age TYPE i.
+      get_complex_name
+        RETURNING VALUE(result) TYPE string,
+
+      set_complex_name
+        IMPORTING name TYPE string.
 
   PROTECTED SECTION.
 
-    METHODS:
-      get_age
-        RETURNING VALUE(result) TYPE i.
-
   PRIVATE SECTION.
 
-    DATA: name TYPE string,
-          age  TYPE i.
+    DATA: name         TYPE string,
+          complex_name TYPE string,
+          age          TYPE i.
 
 ENDCLASS.
 
@@ -35,16 +35,16 @@ CLASS lcl_obj_to_json IMPLEMENTATION.
     result = me->name.
   ENDMETHOD.
 
-  METHOD get_age.
-    result = me->age.
-  ENDMETHOD.
-
   METHOD set_name.
     me->name = name.
   ENDMETHOD.
 
-  METHOD set_age.
-    me->age = age.
+  METHOD get_complex_name.
+    result = me->complex_name.
+  ENDMETHOD.
+
+  METHOD set_complex_name.
+    me->complex_name = name.
   ENDMETHOD.
 
 ENDCLASS.
@@ -367,9 +367,12 @@ CLASS ltcl_json_decode DEFINITION FINAL FOR TESTING
           actual   TYPE any.
 
     METHODS:
-      struct                        FOR TESTING,
-      table                         FOR TESTING,
-      struct_camelcase_complex_names          FOR TESTING.
+      struct                            FOR TESTING,
+      table                             FOR TESTING,
+      struct_camelcase_complex_names    FOR TESTING,
+      object_fill_public_attributes     FOR TESTING,
+      object_fill_by_methods            FOR TESTING,
+      obj_fill_complex_name             FOR TESTING.
 
 ENDCLASS.
 
@@ -409,15 +412,8 @@ CLASS ltcl_json_decode IMPLEMENTATION.
 
     cl_abap_unit_assert=>assert_equals(
       EXPORTING
-        act                  = actual
-        exp                  = expected
-*        ignore_hash_sequence = ABAP_FALSE
-*        tol                  =
-*        msg                  =
-*        level                =
-*        quit                 =
-*      RECEIVING
-*        assertion_failed     =
+        act = actual
+        exp = expected
     ).
 
   ENDMETHOD.
@@ -461,6 +457,75 @@ CLASS ltcl_json_decode IMPLEMENTATION.
                         expected = expected
                     CHANGING
                         actual   = actual ).
+  ENDMETHOD.
+
+  METHOD object_fill_public_attributes.
+
+    DATA: lo_object   TYPE REF TO lcl_obj_to_json.
+
+    CREATE OBJECT: lo_object.
+    options-camelcase = options-use_public_attributes = abap_true.
+
+    o_cut->decode(
+      EXPORTING
+        json_string = '{"publicName":"test"}'
+        options      = options
+      CHANGING
+        value       = lo_object
+    ).
+
+    cl_abap_unit_assert=>assert_equals(
+      EXPORTING
+        act = lo_object->public_name
+        exp = 'test'
+    ).
+
+  ENDMETHOD.
+
+  METHOD object_fill_by_methods.
+
+    DATA: lo_object   TYPE REF TO lcl_obj_to_json.
+
+    CREATE OBJECT: lo_object.
+    options-camelcase = options-use_objs_methods = abap_true.
+
+    o_cut->decode(
+      EXPORTING
+        json_string = '{"name":"test"}'
+        options     = options
+      CHANGING
+        value       = lo_object
+    ).
+
+    cl_abap_unit_assert=>assert_equals(
+      EXPORTING
+        act = lo_object->get_name( )
+        exp = 'test'
+    ).
+
+  ENDMETHOD.
+
+  METHOD obj_fill_complex_name.
+
+    DATA: lo_object   TYPE REF TO lcl_obj_to_json.
+
+    CREATE OBJECT: lo_object.
+    options-camelcase = options-use_objs_methods = abap_true.
+
+    o_cut->decode(
+      EXPORTING
+        json_string = '{"complexName":"test"}'
+        options     = options
+      CHANGING
+        value       = lo_object
+    ).
+
+    cl_abap_unit_assert=>assert_equals(
+      EXPORTING
+        act = lo_object->get_complex_name( )
+        exp = 'test'
+    ).
+
   ENDMETHOD.
 
 ENDCLASS.
