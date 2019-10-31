@@ -353,6 +353,12 @@ CLASS ltcl_json_decode DEFINITION FINAL FOR TESTING
 
   PRIVATE SECTION.
 
+    TYPES:
+      BEGIN OF test_struct,
+        valid TYPE abap_bool,
+        other TYPE string,
+      END OF test_struct.
+
     DATA: o_cut   TYPE REF TO zcl_json_encoder_decoder,
           options TYPE zcl_json_encoder_decoder=>options.
 
@@ -372,7 +378,10 @@ CLASS ltcl_json_decode DEFINITION FINAL FOR TESTING
       struct_camelcase_complex_names    FOR TESTING,
       object_fill_public_attributes     FOR TESTING,
       object_fill_by_methods            FOR TESTING,
-      obj_fill_complex_name             FOR TESTING.
+      obj_fill_complex_name             FOR TESTING,
+      boolean_false                     FOR TESTING,
+      boolean_true                      FOR TESTING,
+      null                              FOR TESTING.
 
 ENDCLASS.
 
@@ -526,6 +535,51 @@ CLASS ltcl_json_decode IMPLEMENTATION.
         exp = 'test'
     ).
 
+  ENDMETHOD.
+
+  METHOD boolean_false.
+
+    DATA: expected TYPE test_struct,
+          actual   TYPE test_struct.
+
+    options-camelcase   = abap_true.
+    expected-valid = ''.
+
+    check_scenario( EXPORTING
+                        json = '{"valid":false}'
+                        expected = expected
+                    CHANGING
+                        actual   = actual ).
+
+  ENDMETHOD.
+
+  METHOD boolean_true.
+
+    DATA: expected TYPE test_struct,
+          actual   TYPE test_struct.
+
+    options-camelcase   = abap_true.
+    expected-valid = 'X'.
+
+    check_scenario( EXPORTING
+                        json = '{"valid":true}'
+                        expected = expected
+                    CHANGING
+                        actual   = actual ).
+  ENDMETHOD.
+
+  METHOD null.
+
+    DATA: expected TYPE test_struct,
+          actual   TYPE test_struct.
+
+    options-camelcase   = abap_true.
+
+    check_scenario( EXPORTING
+                        json = '{"other":null}'
+                        expected = expected
+                    CHANGING
+                        actual   = actual ).
   ENDMETHOD.
 
 ENDCLASS.

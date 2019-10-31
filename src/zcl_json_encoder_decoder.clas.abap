@@ -37,12 +37,11 @@ CLASS zcl_json_encoder_decoder DEFINITION
 
     CONSTANTS:
       BEGIN OF json_element_type,
-        object       TYPE char1 VALUE 'o',
-        array        TYPE char1 VALUE 'r',
-        attribute    TYPE char1 VALUE 'a',
-        value_string TYPE char1 VALUE 's',
-        value_true   TYPE char1 VALUE 't',
-        value_false  TYPE char1 VALUE 'f',
+        object        TYPE char1 VALUE 'o',
+        array         TYPE char1 VALUE 'r',
+        attribute     TYPE char1 VALUE 'a',
+        value_string  TYPE char1 VALUE 's',
+        value_boolean TYPE char1 VALUE 'b',
       END OF json_element_type.
 
     TYPES:
@@ -252,7 +251,14 @@ CLASS zcl_json_encoder_decoder DEFINITION
           options      TYPE zcl_json_encoder_decoder=>options
           reftype      TYPE REF TO cl_abap_typedescr
         CHANGING
-          value        TYPE any.
+          value        TYPE any,
+      decode_boolean_value
+        IMPORTING
+          json         TYPE string
+          position     TYPE i
+        EXPORTING
+          json_element TYPE zcl_json_encoder_decoder=>json_element
+          new_position TYPE i.
 
 ENDCLASS.
 
@@ -347,6 +353,21 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD decode_boolean_value.
+
+    DATA: lv_value_lenght TYPE i.
+
+    json_element-type = zcl_json_encoder_decoder=>json_element_type-value_boolean.
+
+    FIND REGEX '(false|true)' IN SECTION OFFSET position OF json
+        MATCH OFFSET new_position MATCH LENGTH lv_value_lenght
+        SUBMATCHES json_element-value.
+
+    new_position = position + lv_value_lenght.
+
+  ENDMETHOD.
+
+
   METHOD decode_camelcase.
     result = value.
     REPLACE ALL OCCURRENCES OF REGEX `([a-z])([A-Z])` IN result WITH `$1_$2`.
@@ -387,6 +408,18 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
             json_element = json_element
             new_position = new_position
         ).
+      WHEN 'f' OR 't'.
+        decode_boolean_value(
+          EXPORTING
+            json         = json
+            position     = position
+          IMPORTING
+            json_element = json_element
+            new_position = new_position
+        ).
+      WHEN 'n'.
+        new_position = position + 4.
+        FREE: json_element-value.
     ENDCASE.
 
   ENDMETHOD.
@@ -1277,51 +1310,6 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD transfer_value_string.
-
-    FIELD-SYMBOLS: <children> TYPE t_json_element,
-                   <child>    TYPE json_element.
-
-    ASSIGN json_element-children->* TO <children>.
-
-    READ TABLE <children> ASSIGNING <child> INDEX 1.
-
-    value = <child>-value.
-
-  ENDMETHOD.
-
-
-  METHOD type_is_boolean.
-
-    DATA: element_type TYPE REF TO cl_abap_elemdescr.
-
-    IF type->kind NE cl_abap_typedescr=>kind_elem.
-      RETURN.
-    ENDIF.
-
-    element_type ?= type.
-
-    IF element_type->type_kind NE cl_abap_typedescr=>typekind_char OR
-       element_type->output_length NE 1.
-      result = abap_false.
-      RETURN.
-    ENDIF.
-
-    IF c_boolean_types CS element_type->absolute_name.
-      result = abap_true.
-    ENDIF.
-
-  ENDMETHOD.
-
-
-  METHOD value_is_valid.
-
-    IF value IS INITIAL AND options-keep_empty_values EQ abap_false.
-      RETURN.
-    ENDIF.
-    result = abap_true.
-  ENDMETHOD.
-
   METHOD transfer_value_by_method.
 
     IF options-use_objs_methods NE abap_true. RETURN. ENDIF.
@@ -1390,4 +1378,61 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
 
   ENDMETHOD.
 
+
+  METHOD transfer_value_string.
+
+    FIELD-SYMBOLS: <children> TYPE t_json_element,
+                   <child>    TYPE json_element.
+
+    ASSIGN json_element-children->* TO <children>.
+
+    READ TABLE <children> ASSIGNING <child> INDEX 1.
+
+    CASE <child>-type.
+      WHEN json_element_type-value_boolean.
+
+        CASE <child>-value.
+          WHEN 'false'.
+            value = abap_false.
+          WHEN 'true'.
+            value = abap_true.
+        ENDCASE.
+
+      WHEN OTHERS.
+        value = <child>-value.
+    ENDCASE.
+
+  ENDMETHOD.
+
+
+  METHOD type_is_boolean.
+
+    DATA: element_type TYPE REF TO cl_abap_elemdescr.
+
+    IF type->kind NE cl_abap_typedescr=>kind_elem.
+      RETURN.
+    ENDIF.
+
+    element_type ?= type.
+
+    IF element_type->type_kind NE cl_abap_typedescr=>typekind_char OR
+       element_type->output_length NE 1.
+      result = abap_false.
+      RETURN.
+    ENDIF.
+
+    IF c_boolean_types CS element_type->absolute_name.
+      result = abap_true.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD value_is_valid.
+
+    IF value IS INITIAL AND options-keep_empty_values EQ abap_false.
+      RETURN.
+    ENDIF.
+    result = abap_true.
+  ENDMETHOD.
 ENDCLASS.
