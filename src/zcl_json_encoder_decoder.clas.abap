@@ -27,6 +27,7 @@ CLASS zcl_json_encoder_decoder DEFINITION
 
       decode
         IMPORTING json_string TYPE clike
+                  options     TYPE zcl_json_encoder_decoder=>options
         CHANGING  value       TYPE any.
 
   PROTECTED SECTION.
@@ -115,13 +116,13 @@ CLASS zcl_json_encoder_decoder DEFINITION
           type    TYPE REF TO cl_abap_typedescr
         CHANGING
           result  TYPE string,
-      handle_case
+      handle_encode_case
         IMPORTING
           value         TYPE clike
           options       TYPE zcl_json_encoder_decoder=>options
         RETURNING
           VALUE(result) TYPE string,
-      camelcase
+      encode_camelcase
         IMPORTING
           value         TYPE string
         RETURNING
@@ -189,21 +190,49 @@ CLASS zcl_json_encoder_decoder DEFINITION
         EXPORTING
           json_element TYPE zcl_json_encoder_decoder=>json_element
           new_position TYPE i,
-      transport_values
-        EXPORTING
+      transfer_values
+        IMPORTING
           json_element TYPE zcl_json_encoder_decoder=>json_element
+          options      TYPE zcl_json_encoder_decoder=>options
         CHANGING
           value        TYPE any,
       transfer_values_struct
         IMPORTING
           json_element TYPE zcl_json_encoder_decoder=>json_element
+          options      TYPE zcl_json_encoder_decoder=>options
         CHANGING
           value        TYPE any,
-      transport_value_string
+      transfer_value_string
         IMPORTING
           json_element TYPE zcl_json_encoder_decoder=>json_element
+          options      TYPE zcl_json_encoder_decoder=>options
         CHANGING
-          value        TYPE any.
+          value        TYPE any,
+      decode_array
+        IMPORTING
+          json         TYPE string
+          position     TYPE i
+        EXPORTING
+          json_element TYPE zcl_json_encoder_decoder=>json_element
+          new_position TYPE i,
+      transfer_values_table
+        IMPORTING
+          json_element TYPE zcl_json_encoder_decoder=>json_element
+          options      TYPE zcl_json_encoder_decoder=>options
+          reftype      TYPE REF TO cl_abap_typedescr
+        CHANGING
+          value        TYPE any,
+      handle_decode_case
+        IMPORTING
+          value         TYPE clike
+          options       TYPE zcl_json_encoder_decoder=>options
+        RETURNING
+          VALUE(result) TYPE string,
+      decode_camelcase
+        IMPORTING
+          value         TYPE clike
+        RETURNING
+          VALUE(result) TYPE string.
 
 ENDCLASS.
 
@@ -527,7 +556,7 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
         CONTINUE.
       ENDIF.
 
-      json_fieldname = handle_case(
+      json_fieldname = handle_encode_case(
                         value   = <component>-name
                         options = options ).
 
@@ -556,19 +585,19 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD handle_case.
+  METHOD handle_encode_case.
 
     result = value.
     TRANSLATE result TO LOWER CASE.
 
     IF options-camelcase EQ abap_true.
-      result = camelcase( value = result ).
+      result = encode_camelcase( value = result ).
     ENDIF.
 
   ENDMETHOD.
 
 
-  METHOD camelcase.
+  METHOD encode_camelcase.
 
     DATA: tokens TYPE TABLE OF char128.
     FIELD-SYMBOLS: <token> LIKE LINE OF tokens.
@@ -705,11 +734,7 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
           DATA: elem_descr TYPE REF TO cl_abap_elemdescr.
 
           elem_descr ?= type_descr.
-
           CREATE DATA ref_value TYPE HANDLE elem_descr.
-
-        WHEN cl_abap_typedescr=>kind_struct.
-        WHEN cl_abap_typedescr=>kind_table.
 
       ENDCASE.
 
@@ -793,7 +818,7 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
           result  = json_value
       ).
 
-      json_fieldname = handle_case(
+      json_fieldname = handle_encode_case(
                         value   = <attribute_descr>-name
                         options = options ).
 
@@ -847,7 +872,7 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
 
       ENDLOOP.
 
-      result = handle_case( value   = result
+      result = handle_encode_case( value   = result
                             options = options ).
 
       RETURN.
@@ -886,9 +911,10 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
         IMPORTING
             json_element = lw_decoded ).
 
-    transport_values(
-       IMPORTING
+    transfer_values(
+       EXPORTING
            json_element = lw_decoded
+           options      = options
        CHANGING value = value
     ).
 
@@ -899,15 +925,20 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
 
     DATA: lv_new_position TYPE i.
 
-    FIELD-SYMBOLS: <children> TYPE t_json_element.
-
-    json_element = create_element_json( ).
-    ASSIGN json_element-children->* TO <children>.
-
     CASE json+position(1).
       WHEN '{'.
         lv_new_position = position + 1.
         decode_object(
+          EXPORTING
+            json         = json
+            position     = lv_new_position
+          IMPORTING
+            json_element = json_element
+            new_position = new_position
+        ).
+      WHEN '['.
+        lv_new_position = position + 1.
+        decode_array(
           EXPORTING
             json         = json
             position     = lv_new_position
@@ -1009,7 +1040,7 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD transport_values.
+  METHOD transfer_values.
 
     DATA: reftype TYPE REF TO cl_abap_typedescr.
 
@@ -1020,9 +1051,17 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
         transfer_values_struct(
           EXPORTING
             json_element = json_element
+            options      = options
           CHANGING value = value
         ).
-
+      WHEN cl_abap_typedescr=>kind_table.
+        transfer_values_table(
+          EXPORTING
+            json_element = json_element
+            options      = options
+            reftype      = reftype
+          CHANGING value = value
+        ).
     ENDCASE.
 
   ENDMETHOD.
@@ -1031,6 +1070,8 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
   METHOD transfer_values_struct.
 
     IF json_element-type NE json_element_type-object. RETURN. ENDIF.
+
+    DATA: lv_attribute_name TYPE string.
 
     FIELD-SYMBOLS: <children> TYPE t_json_element,
                    <child>    TYPE json_element,
@@ -1043,13 +1084,18 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
       CASE <child>-type.
         WHEN json_element_type-attribute.
 
-          ASSIGN COMPONENT <child>-value OF STRUCTURE value TO <field>.
+          lv_attribute_name = handle_decode_case(
+                                value   = <child>-value
+                                options = options ).
+
+          ASSIGN COMPONENT lv_attribute_name OF STRUCTURE value TO <field>.
           IF sy-subrc NE 0.
             CONTINUE.
           ENDIF.
 
-          transport_value_string(
+          transfer_value_string(
             EXPORTING json_element = <child>
+                      options      = options
             CHANGING value = <field>
            ).
       ENDCASE.
@@ -1059,7 +1105,7 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD transport_value_string.
+  METHOD transfer_value_string.
 
     FIELD-SYMBOLS: <children> TYPE t_json_element,
                    <child>    TYPE json_element.
@@ -1070,6 +1116,109 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
 
     value = <child>-value.
 
+  ENDMETHOD.
+
+
+  METHOD decode_array.
+
+    DATA: lv_position             TYPE i,
+          lv_property_name_length TYPE i,
+          lv_property_name        TYPE string,
+          lw_json_element         TYPE json_element.
+
+    FIELD-SYMBOLS: <children>       TYPE t_json_element,
+                   <child_children> TYPE t_json_element,
+                   <element>        TYPE json_element.
+
+    json_element = create_element_json( ).
+    ASSIGN json_element-children->* TO <children>.
+    json_element-type = zcl_json_encoder_decoder=>json_element_type-array.
+
+    lv_position = position.
+
+    DO.
+
+      CASE json+lv_position(1).
+        WHEN ']'.
+          new_position = lv_position + 1.
+          EXIT.
+        WHEN ','.
+          lv_position = lv_position + 1.
+      ENDCASE.
+
+      decode_element(
+          EXPORTING
+            json         = json
+            position     = lv_position
+          IMPORTING
+            json_element = lw_json_element
+            new_position = lv_position
+        ).
+
+      APPEND lw_json_element TO <children>.
+      new_position = lv_position.
+
+    ENDDO.
+
+  ENDMETHOD.
+
+
+  METHOD transfer_values_table.
+
+    DATA: table_type    TYPE REF TO cl_abap_tabledescr,
+          struct_type   TYPE REF TO cl_abap_structdescr,
+          type_name     TYPE string,
+          new_line_data TYPE REF TO data.
+
+    FIELD-SYMBOLS: <children> TYPE t_json_element,
+                   <child>    TYPE json_element,
+                   <struct>   TYPE any,
+                   <itab>     TYPE table.
+
+    ASSIGN value TO <itab>.
+
+    table_type ?= reftype.
+    struct_type ?= table_type->get_table_line_type( ).
+    type_name = struct_type->get_relative_name( ).
+
+    ASSIGN json_element-children->* TO <children>.
+
+    LOOP AT <children> ASSIGNING <child>.
+
+      CREATE DATA new_line_data TYPE (type_name).
+      ASSIGN new_line_data->* TO <struct>.
+
+      transfer_values(
+        EXPORTING
+          json_element = <child>
+          options      = options
+        CHANGING
+          value        = <struct>
+      ).
+
+      APPEND <struct> TO <itab>.
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD handle_decode_case.
+
+    result = value.
+
+    IF options-camelcase EQ abap_true.
+      result = decode_camelcase( value = result ).
+    ENDIF.
+
+    TRANSLATE result TO UPPER CASE.
+
+  ENDMETHOD.
+
+
+  METHOD decode_camelcase.
+    result = value.
+    REPLACE ALL OCCURRENCES OF REGEX `([a-z])([A-Z])` IN result WITH `$1_$2`.
   ENDMETHOD.
 
 ENDCLASS.

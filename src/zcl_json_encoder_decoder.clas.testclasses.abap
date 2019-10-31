@@ -367,7 +367,9 @@ CLASS ltcl_json_decode DEFINITION FINAL FOR TESTING
           actual   TYPE any.
 
     METHODS:
-      range_struct                        FOR TESTING.
+      struct                        FOR TESTING,
+      table                         FOR TESTING,
+      struct_camelcase_complex_names          FOR TESTING.
 
 ENDCLASS.
 
@@ -377,7 +379,7 @@ CLASS ltcl_json_decode IMPLEMENTATION.
     CREATE OBJECT o_cut.
   ENDMETHOD.
 
-  METHOD range_struct.
+  METHOD struct.
 
     DATA: lw_actual   TYPE ace_generic_range,
           lw_expected TYPE ace_generic_range.
@@ -400,6 +402,7 @@ CLASS ltcl_json_decode IMPLEMENTATION.
     o_cut->decode(
       EXPORTING
         json_string = json
+        options      = options
       CHANGING
         value       = actual
     ).
@@ -417,6 +420,47 @@ CLASS ltcl_json_decode IMPLEMENTATION.
 *        assertion_failed     =
     ).
 
+  ENDMETHOD.
+
+  METHOD table.
+
+    DATA: lt_actual   TYPE ace_generic_range_t,
+          lw_expected TYPE ace_generic_range,
+          lt_expected TYPE ace_generic_range_t.
+
+    lw_expected-sign    = 'I'.
+    lw_expected-option  = 'EQ'.
+    lw_expected-low     = '0010'.
+    APPEND lw_expected TO lt_expected.
+    lw_expected-low     = '0020'.
+    APPEND lw_expected TO lt_expected.
+
+    check_scenario( EXPORTING
+                        json = '[{"sign":"I","option":"EQ","low":"0010","high":""},{"sign":"I","option":"EQ","low":"0020","high":""}]'
+                        expected = lt_expected
+                    CHANGING
+                        actual   = lt_actual ).
+
+  ENDMETHOD.
+
+  METHOD struct_camelcase_complex_names.
+
+    TYPES:
+      BEGIN OF struct_complex_name,
+        field_name TYPE string,
+      END OF struct_complex_name.
+
+    DATA: expected TYPE struct_complex_name,
+          actual   TYPE struct_complex_name.
+
+    options-camelcase   = abap_true.
+    expected-field_name = 'Valdir'.
+
+    check_scenario( EXPORTING
+                        json = '{"fieldName":"Valdir"}'
+                        expected = expected
+                    CHANGING
+                        actual   = actual ).
   ENDMETHOD.
 
 ENDCLASS.
