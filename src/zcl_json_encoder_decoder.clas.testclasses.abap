@@ -355,8 +355,11 @@ CLASS ltcl_json_decode DEFINITION FINAL FOR TESTING
 
     TYPES:
       BEGIN OF test_struct,
-        valid TYPE abap_bool,
-        other TYPE string,
+        valid     TYPE abap_bool,
+        other     TYPE string,
+        timestamp TYPE timestamp,
+        time      TYPE sy-uzeit,
+        date      TYPE sy-datum,
       END OF test_struct.
 
     DATA: o_cut   TYPE REF TO zcl_json_encoder_decoder,
@@ -381,7 +384,10 @@ CLASS ltcl_json_decode DEFINITION FINAL FOR TESTING
       obj_fill_complex_name             FOR TESTING,
       boolean_false                     FOR TESTING,
       boolean_true                      FOR TESTING,
-      null                              FOR TESTING.
+      null                              FOR TESTING,
+      timestamp                         FOR TESTING,
+      date                              FOR TESTING,
+      time                              FOR TESTING.
 
 ENDCLASS.
 
@@ -577,6 +583,52 @@ CLASS ltcl_json_decode IMPLEMENTATION.
 
     check_scenario( EXPORTING
                         json = '{"other":null}'
+                        expected = expected
+                    CHANGING
+                        actual   = actual ).
+  ENDMETHOD.
+
+  METHOD timestamp.
+
+    DATA: expected TYPE test_struct,
+          actual   TYPE test_struct.
+
+    options-camelcase   = abap_true.
+    expected-timestamp = '20191023145508'.
+
+    check_scenario( EXPORTING
+                        json = '{"timestamp":"2019-10-23T14:55:08"}'
+                        expected = expected
+                    CHANGING
+                        actual   = actual ).
+
+  ENDMETHOD.
+
+  METHOD date.
+
+    DATA: expected TYPE test_struct,
+          actual   TYPE test_struct.
+
+    options-camelcase   = abap_true.
+    expected-date       = '20191023'.
+
+    check_scenario( EXPORTING
+                        json = '{"date":"2019-10-23"}'
+                        expected = expected
+                    CHANGING
+                        actual   = actual ).
+  ENDMETHOD.
+
+  METHOD time.
+
+    DATA: expected TYPE test_struct,
+          actual   TYPE test_struct.
+
+    options-camelcase   = abap_true.
+    expected-time       = '145508'.
+
+    check_scenario( EXPORTING
+                        json = '{"time":"14:55:08"}'
                         expected = expected
                     CHANGING
                         actual   = actual ).

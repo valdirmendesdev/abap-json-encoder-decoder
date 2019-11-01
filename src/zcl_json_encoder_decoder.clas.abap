@@ -205,6 +205,7 @@ CLASS zcl_json_encoder_decoder DEFINITION
         IMPORTING
           json_element TYPE zcl_json_encoder_decoder=>json_element
           options      TYPE zcl_json_encoder_decoder=>options
+          reftype      TYPE REF TO cl_abap_typedescr
         CHANGING
           value        TYPE any,
       decode_array
@@ -258,7 +259,22 @@ CLASS zcl_json_encoder_decoder DEFINITION
           position     TYPE i
         EXPORTING
           json_element TYPE zcl_json_encoder_decoder=>json_element
-          new_position TYPE i.
+          new_position TYPE i,
+      timestamp_iso_to_sap
+        IMPORTING
+          timestamp     TYPE string
+        RETURNING
+          VALUE(result) TYPE timestamp,
+      date_iso_to_sap
+        IMPORTING
+          date_iso      TYPE string
+        RETURNING
+          VALUE(result) TYPE string,
+      time_iso_to_sap
+        IMPORTING
+          time_iso      TYPE string
+        RETURNING
+          VALUE(result) TYPE string.
 
 ENDCLASS.
 
@@ -1168,6 +1184,7 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
           EXPORTING
             json_element = json_element
             options      = options
+            reftype      = reftype
           CHANGING
             value        = value
         ).
@@ -1388,18 +1405,30 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
 
     READ TABLE <children> ASSIGNING <child> INDEX 1.
 
-    CASE <child>-type.
-      WHEN json_element_type-value_boolean.
+    IF reftype->get_relative_name( ) EQ 'TIMESTAMP'.
+      value = timestamp_iso_to_sap( <child>-value ).
+      RETURN.
+    ENDIF.
 
-        CASE <child>-value.
-          WHEN 'false'.
-            value = abap_false.
-          WHEN 'true'.
-            value = abap_true.
-        ENDCASE.
-
+    CASE reftype->type_kind.
+      WHEN cl_abap_typedescr=>typekind_date.
+        value = date_iso_to_sap( <child>-value ).
+      WHEN cl_abap_typedescr=>typekind_time.
+        value = time_iso_to_sap( <child>-value ).
       WHEN OTHERS.
-        value = <child>-value.
+        CASE <child>-type.
+          WHEN json_element_type-value_boolean.
+
+            CASE <child>-value.
+              WHEN 'false'.
+                value = abap_false.
+              WHEN 'true'.
+                value = abap_true.
+            ENDCASE.
+
+          WHEN OTHERS.
+            value = <child>-value.
+        ENDCASE.
     ENDCASE.
 
   ENDMETHOD.
@@ -1435,4 +1464,56 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
     ENDIF.
     result = abap_true.
   ENDMETHOD.
+
+  METHOD timestamp_iso_to_sap.
+    DATA: date_iso TYPE string,
+          time_iso TYPE string,
+          tsc(14)  TYPE c.
+
+    SPLIT timestamp AT 'T' INTO date_iso time_iso.
+    CHECK sy-subrc = 0.
+
+    tsc(8) = date_iso_to_sap( date_iso ).
+    tsc+8(6) = time_iso_to_sap( time_iso ).
+    result = tsc.
+  ENDMETHOD.
+
+
+  METHOD date_iso_to_sap.
+    DATA: year(4)  TYPE n,
+          month(2) TYPE n,
+          day(2)   TYPE n.
+
+    "// ISO-8601 allowed formats:
+    "//  YYYY-MM-DD or YYYYMMDD or YYYY-MM
+    FIND REGEX '(\d{4})-?(\d{2})-?(\d{2})?' IN date_iso
+      SUBMATCHES year month day.
+    IF year IS INITIAL AND
+       month IS INITIAL AND
+       day IS INITIAL.
+      RETURN.
+    ENDIF.
+    IF day IS INITIAL.
+      day = 1.
+    ENDIF.
+
+    CONCATENATE year month day INTO result.
+
+  ENDMETHOD.
+
+
+  METHOD time_iso_to_sap.
+    DATA: hour(2) TYPE n,
+          min(2)  TYPE n,
+          sec(2)  TYPE n.
+
+    "// ISO-8601 allowed formats:
+    "//  hh:mm:ss or hh:mm or hhmmss or hhmm or hh
+    FIND REGEX '(\d{2}):?(\d{2})?:?(\d{2})?' IN time_iso
+      SUBMATCHES hour min sec.
+
+    CONCATENATE hour min sec INTO result.
+
+  ENDMETHOD.
+
 ENDCLASS.
