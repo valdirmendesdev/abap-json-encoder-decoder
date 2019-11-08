@@ -1310,13 +1310,22 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
 
     table_type ?= reftype.
     struct_type ?= table_type->get_table_line_type( ).
-    type_name = struct_type->get_relative_name( ).
+    IF struct_type->is_ddic_type( ).
+      type_name = struct_type->get_relative_name( ).
+    ELSE.
+      type_name = struct_type->absolute_name.
+    ENDIF.
 
     ASSIGN json_element-children->* TO <children>.
 
     LOOP AT <children> ASSIGNING <child>.
 
-      CREATE DATA new_line_data TYPE (type_name).
+      TRY.
+          CREATE DATA new_line_data TYPE (type_name).
+        CATCH cx_root.
+          CONTINUE.
+      ENDTRY.
+
       ASSIGN new_line_data->* TO <struct>.
 
       transfer_values(
