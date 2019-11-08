@@ -310,7 +310,14 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
           lw_decoded       TYPE json_element.
 
     condensed_string = json_string.
-    CONDENSE condensed_string.
+    REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>newline IN condensed_string WITH ''.
+    REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>cr_lf IN condensed_string WITH ''.
+    REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>horizontal_tab IN condensed_string WITH ''.
+    REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>form_feed IN condensed_string WITH ''.
+    REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>vertical_tab IN condensed_string WITH ''.
+    REPLACE ALL OCCURRENCES OF REGEX '(\\t|\\r|\\n|\\f)' IN condensed_string WITH ''.
+    REPLACE ALL OCCURRENCES OF REGEX '\\"' IN condensed_string WITH '"'.
+    CONDENSE condensed_string NO-GAPS.
 
     decode_element(
         EXPORTING
