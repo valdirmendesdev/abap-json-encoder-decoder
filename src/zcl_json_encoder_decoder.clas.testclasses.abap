@@ -24,8 +24,7 @@ CLASS lcl_obj_to_json DEFINITION.
   PRIVATE SECTION.
 
     DATA: name         TYPE string,
-          complex_name TYPE string,
-          age          TYPE i.
+          complex_name TYPE string.
 
 ENDCLASS.
 
@@ -379,6 +378,8 @@ CLASS ltcl_json_decode DEFINITION FINAL FOR TESTING
       struct                            FOR TESTING,
       table                             FOR TESTING,
       struct_camelcase_complex_names    FOR TESTING,
+      struct_field_internal_table       FOR TESTING,
+      struct_oo_internal_table          FOR TESTING,
       object_fill_public_attributes     FOR TESTING,
       object_fill_by_methods            FOR TESTING,
       obj_fill_complex_name             FOR TESTING,
@@ -632,6 +633,79 @@ CLASS ltcl_json_decode IMPLEMENTATION.
                         expected = expected
                     CHANGING
                         actual   = actual ).
+  ENDMETHOD.
+
+  METHOD struct_field_internal_table.
+
+    TYPES:
+      BEGIN OF ty_it,
+        name TYPE string,
+      END OF ty_it,
+
+      ty_it_t TYPE STANDARD TABLE OF ty_it WITH DEFAULT KEY,
+
+      BEGIN OF struct_complex_name,
+        field_name TYPE string,
+        names      TYPE ty_it_t,
+      END OF struct_complex_name.
+
+    DATA: struct          TYPE struct_complex_name,
+          actual          TYPE struct_complex_name,
+          internal_struct TYPE ty_it.
+
+    options-camelcase = abap_true.
+
+    struct-field_name = 'test'.
+    internal_struct-name = 'test'. APPEND internal_struct TO struct-names.
+    check_scenario( EXPORTING
+                    json = '{"fieldName":"test","names":[{"name":"test"}]}'
+                    expected = struct
+                CHANGING
+                    actual   = actual ).
+
+  ENDMETHOD.
+
+  METHOD struct_oo_internal_table.
+
+    TYPES:
+      BEGIN OF struct_complex_name,
+        field_name TYPE string,
+        names      TYPE STANDARD TABLE OF REF TO lcl_obj_to_json WITH DEFAULT KEY,
+      END OF struct_complex_name.
+
+    DATA: obj    TYPE REF TO lcl_obj_to_json,
+          actual TYPE struct_complex_name.
+
+    options-camelcase        = abap_true.
+    options-use_objs_methods = abap_true.
+
+    o_cut->decode(
+      EXPORTING
+        json_string = '{"fieldName":"test","names":[{"name":"test"}]}'
+        options     = options
+      CHANGING
+        value       = actual
+    ).
+
+    cl_abap_unit_assert=>assert_equals(
+      EXPORTING
+        act = actual-field_name
+        exp = 'test'
+    ).
+
+    cl_abap_unit_assert=>assert_equals(
+        EXPORTING
+            act = lines( actual-names )
+            exp = 1
+    ).
+
+    obj = actual-names[ 1 ].
+
+    cl_abap_unit_assert=>assert_equals(
+        EXPORTING
+            act = obj->get_name( )
+            exp = 'test'
+    ).
   ENDMETHOD.
 
 ENDCLASS.

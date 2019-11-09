@@ -1296,10 +1296,12 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
 
   METHOD transfer_values_table.
 
-    DATA: table_type    TYPE REF TO cl_abap_tabledescr,
-          struct_type   TYPE REF TO cl_abap_structdescr,
-          type_name     TYPE string,
-          new_line_data TYPE REF TO data.
+    DATA: table_type      TYPE REF TO cl_abap_tabledescr,
+          struct_type     TYPE REF TO cl_abap_typedescr,
+          ref_type        TYPE REF TO cl_abap_refdescr,
+          referenced_type TYPE REF TO cl_abap_typedescr,
+          type_name       TYPE string,
+          new_line_data   TYPE REF TO data.
 
     FIELD-SYMBOLS: <children> TYPE t_json_element,
                    <child>    TYPE json_element,
@@ -1310,23 +1312,54 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
 
     table_type ?= reftype.
     struct_type ?= table_type->get_table_line_type( ).
-    IF struct_type->is_ddic_type( ).
-      type_name = struct_type->get_relative_name( ).
-    ELSE.
-      type_name = struct_type->absolute_name.
-    ENDIF.
 
     ASSIGN json_element-children->* TO <children>.
+
+    READ TABLE <children> ASSIGNING <child> INDEX 1.
+    IF sy-subrc EQ 0 AND <child>-type = json_element_type-array.
+      ASSIGN <child>-children->* TO <children>.
+    ENDIF.
 
     LOOP AT <children> ASSIGNING <child>.
 
       TRY.
-          CREATE DATA new_line_data TYPE (type_name).
+
+          CASE struct_type->kind.
+            WHEN struct_type->kind_struct.
+              IF struct_type->is_ddic_type( ).
+                type_name = struct_type->get_relative_name( ).
+              ELSE.
+                type_name = struct_type->absolute_name.
+              ENDIF.
+              ASSIGN new_line_data->* TO <struct>.
+              CREATE DATA new_line_data TYPE (type_name).
+              ASSIGN new_line_data->* TO <struct>.
+            WHEN struct_type->kind_ref.
+              ref_type ?=  struct_type.
+              referenced_type = ref_type->get_referenced_type( ).
+              type_name = referenced_type->get_relative_name( ).
+              DATA: lr_data TYPE REF TO data.
+
+              CREATE DATA lr_data TYPE HANDLE ref_type.
+              DATA(obj_test) = cl_abap_objectdescr=>describe_by_data_ref( lr_data ).
+              ASSIGN lr_data->* TO <struct>.
+
+              DO 2 TIMES.
+
+                TRY.
+                    CREATE OBJECT <struct> TYPE (type_name).
+                    EXIT.
+                  CATCH cx_root.
+                    type_name = referenced_type->absolute_name.
+                ENDTRY.
+
+              ENDDO.
+
+          ENDCASE.
+
         CATCH cx_root.
           CONTINUE.
       ENDTRY.
-
-      ASSIGN new_line_data->* TO <struct>.
 
       transfer_values(
         EXPORTING
@@ -1337,6 +1370,8 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
       ).
 
       APPEND <struct> TO <itab>.
+
+      CLEAR: new_line_data.
 
     ENDLOOP.
 
