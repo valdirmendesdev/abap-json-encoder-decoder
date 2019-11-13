@@ -28,7 +28,7 @@ CLASS zcl_json_encoder_decoder DEFINITION
       decode
         IMPORTING json_string TYPE clike
                   options     TYPE zcl_json_encoder_decoder=>options
-        CHANGING  value       TYPE any.
+        CHANGING  result      TYPE any.
 
   PROTECTED SECTION.
   PRIVATE SECTION.
@@ -41,17 +41,19 @@ CLASS zcl_json_encoder_decoder DEFINITION
         array         TYPE char1 VALUE 'r',
         attribute     TYPE char1 VALUE 'a',
         value_string  TYPE char1 VALUE 's',
-        value_boolean TYPE char1 VALUE 'b',
+        special_value TYPE char1 VALUE 'b',
+        name          TYPE char1 VALUE 'n',
       END OF json_element_type.
 
     TYPES:
       BEGIN OF json_element,
         type     TYPE char1,
+        name     TYPE string,
         value    TYPE string,
         children TYPE REF TO data,
       END OF json_element,
 
-      t_json_element TYPE STANDARD TABLE OF json_element.
+      t_json_element TYPE STANDARD TABLE OF json_element WITH DEFAULT KEY.
 
     DATA: patterns TYPE STANDARD TABLE OF REF TO cl_abap_regex.
 
@@ -165,30 +167,9 @@ CLASS zcl_json_encoder_decoder DEFINITION
           options       TYPE zcl_json_encoder_decoder=>options
         RETURNING
           VALUE(result) TYPE string,
-      decode_element
-        IMPORTING
-          json         TYPE string
-          position     TYPE i
-        EXPORTING
-          json_element TYPE zcl_json_encoder_decoder=>json_element
-          new_position TYPE i,
-      decode_object
-        IMPORTING
-          json         TYPE string
-          position     TYPE i
-        EXPORTING
-          json_element TYPE zcl_json_encoder_decoder=>json_element
-          new_position TYPE i,
       create_element_json
         RETURNING
           VALUE(result) TYPE zcl_json_encoder_decoder=>json_element,
-      decode_string_value
-        IMPORTING
-          json         TYPE string
-          position     TYPE i
-        EXPORTING
-          json_element TYPE zcl_json_encoder_decoder=>json_element
-          new_position TYPE i,
       transfer_values
         IMPORTING
           json_element TYPE zcl_json_encoder_decoder=>json_element
@@ -208,13 +189,6 @@ CLASS zcl_json_encoder_decoder DEFINITION
           reftype      TYPE REF TO cl_abap_typedescr
         CHANGING
           value        TYPE any,
-      decode_array
-        IMPORTING
-          json         TYPE string
-          position     TYPE i
-        EXPORTING
-          json_element TYPE zcl_json_encoder_decoder=>json_element
-          new_position TYPE i,
       transfer_values_table
         IMPORTING
           json_element TYPE zcl_json_encoder_decoder=>json_element
@@ -253,13 +227,6 @@ CLASS zcl_json_encoder_decoder DEFINITION
           reftype      TYPE REF TO cl_abap_typedescr
         CHANGING
           value        TYPE any,
-      decode_boolean_value
-        IMPORTING
-          json         TYPE string
-          position     TYPE i
-        EXPORTING
-          json_element TYPE zcl_json_encoder_decoder=>json_element
-          new_position TYPE i,
       timestamp_iso_to_sap
         IMPORTING
           timestamp     TYPE string
@@ -274,7 +241,35 @@ CLASS zcl_json_encoder_decoder DEFINITION
         IMPORTING
           time_iso      TYPE string
         RETURNING
-          VALUE(result) TYPE string.
+          VALUE(result) TYPE string,
+      decode_string
+        IMPORTING json     TYPE string
+        CHANGING  position TYPE i
+                  result   TYPE zcl_json_encoder_decoder=>json_element,
+      decode_object
+        IMPORTING
+          json     TYPE string
+        CHANGING
+          position TYPE i
+          result   TYPE zcl_json_encoder_decoder=>json_element,
+      decode_attribute
+        IMPORTING
+          json     TYPE string
+        CHANGING
+          position TYPE i
+          result   TYPE zcl_json_encoder_decoder=>json_element,
+      decode_named_element
+        IMPORTING
+          json     TYPE string
+        CHANGING
+          position TYPE i
+          result   TYPE zcl_json_encoder_decoder=>json_element,
+      decode_array
+        IMPORTING
+          json     TYPE string
+        CHANGING
+          position TYPE i
+          result   TYPE zcl_json_encoder_decoder=>json_element.
 
 ENDCLASS.
 
@@ -304,6 +299,27 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD date_iso_to_sap.
+    DATA: year(4)  TYPE n,
+          month(2) TYPE n,
+          day(2)   TYPE n.
+
+    "// ISO-8601 allowed formats:
+    "//  YYYY-MM-DD or YYYYMMDD or YYYY-MM
+    FIND REGEX '(\d{4})-?(\d{2})-?(\d{2})?' IN date_iso
+      SUBMATCHES year month day.
+    IF sy-subrc NE 0.
+      RETURN.
+    ENDIF.
+    IF day IS INITIAL.
+      day = 1.
+    ENDIF.
+
+    CONCATENATE year month day INTO result.
+
+  ENDMETHOD.
+
+
   METHOD decode.
 
     DATA: condensed_string TYPE string,
@@ -319,18 +335,20 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
     REPLACE ALL OCCURRENCES OF REGEX '\\"' IN condensed_string WITH '"'.
     CONDENSE condensed_string NO-GAPS.
 
-    decode_element(
+    DATA: lv_position TYPE i.
+
+    decode_string(
         EXPORTING
             json     = condensed_string
-            position = 0
-        IMPORTING
-            json_element = lw_decoded ).
+        CHANGING
+            position = lv_position
+            result   = lw_decoded ).
 
     transfer_values(
        EXPORTING
            json_element = lw_decoded
            options      = options
-       CHANGING value = value
+       CHANGING value = result
     ).
 
   ENDMETHOD.
@@ -338,55 +356,71 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
 
   METHOD decode_array.
 
-    DATA: lv_position     TYPE i,
-          lw_json_element TYPE json_element.
+    DATA: lw_json_element TYPE zcl_json_encoder_decoder=>json_element.
 
     FIELD-SYMBOLS: <children>       TYPE t_json_element.
 
-    json_element = create_element_json( ).
-    ASSIGN json_element-children->* TO <children>.
-    json_element-type = zcl_json_encoder_decoder=>json_element_type-array.
-
-    lv_position = position.
+    IF result-type NE zcl_json_encoder_decoder=>json_element_type-name.
+      result = create_element_json( ).
+    ENDIF.
+    result-type = zcl_json_encoder_decoder=>json_element_type-array.
+    ASSIGN result-children->* TO <children>.
 
     DO.
 
-      CASE json+lv_position(1).
+      CASE json+position(1).
         WHEN ']'.
-          new_position = lv_position + 1.
+          position = position + 1.
           EXIT.
         WHEN ','.
-          lv_position = lv_position + 1.
+          position = position + 1.
       ENDCASE.
 
-      decode_element(
-          EXPORTING
-            json         = json
-            position     = lv_position
-          IMPORTING
-            json_element = lw_json_element
-            new_position = lv_position
-        ).
+      decode_string(
+        EXPORTING
+          json     = json
+        CHANGING
+          position = position
+          result   = lw_json_element
+      ).
 
-      APPEND lw_json_element TO <children>.
-      new_position = lv_position.
+      IF lw_json_element IS NOT INITIAL.
+        APPEND lw_json_element TO <children>.
+      ENDIF.
+      CLEAR: lw_json_element.
 
     ENDDO.
 
   ENDMETHOD.
 
 
-  METHOD decode_boolean_value.
+  METHOD decode_attribute.
 
-    DATA: lv_value_lenght TYPE i.
+    DATA: lv_expression_length TYPE i,
+          lv_match1            TYPE string,
+          lv_match2            TYPE string.
 
-    json_element-type = zcl_json_encoder_decoder=>json_element_type-value_boolean.
+    result-type = zcl_json_encoder_decoder=>json_element_type-attribute.
 
-    FIND REGEX '(false|true)' IN SECTION OFFSET position OF json
-        MATCH OFFSET new_position MATCH LENGTH lv_value_lenght
-        SUBMATCHES json_element-value.
+    FIND REGEX '\A\s*"([^:]*)":("([^,]*)"|true|false|null)'
+        IN SECTION OFFSET position OF json
+        MATCH LENGTH lv_expression_length
+              SUBMATCHES result-name lv_match1 lv_match2.
 
-    new_position = position + lv_value_lenght.
+    IF lv_match2 IS NOT INITIAL.
+      result-value = lv_match2.
+    ELSE.
+
+      CASE lv_match1.
+        WHEN 'true' OR 'false' OR 'null'.
+          result-type = zcl_json_encoder_decoder=>json_element_type-special_value.
+          result-value = lv_match1.
+        WHEN '""'.
+          CLEAR result-value.
+      ENDCASE.
+    ENDIF.
+
+    position = position + lv_expression_length.
 
   ENDMETHOD.
 
@@ -397,129 +431,125 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD decode_element.
+  METHOD decode_named_element.
 
-    DATA: lv_new_position TYPE i.
+    DATA: lw_json_element      TYPE zcl_json_encoder_decoder=>json_element,
+          lv_expression_length TYPE i.
 
-    CASE json+position(1).
-      WHEN '{'.
-        lv_new_position = position + 1.
-        decode_object(
-          EXPORTING
-            json         = json
-            position     = lv_new_position
-          IMPORTING
-            json_element = json_element
-            new_position = new_position
-        ).
-      WHEN '['.
-        lv_new_position = position + 1.
-        decode_array(
-          EXPORTING
-            json         = json
-            position     = lv_new_position
-          IMPORTING
-            json_element = json_element
-            new_position = new_position
-        ).
-      WHEN '"'.
-        decode_string_value(
-          EXPORTING
-            json         = json
-            position     = position
-          IMPORTING
-            json_element = json_element
-            new_position = new_position
-        ).
-      WHEN 'f' OR 't'.
-        decode_boolean_value(
-          EXPORTING
-            json         = json
-            position     = position
-          IMPORTING
-            json_element = json_element
-            new_position = new_position
-        ).
-      WHEN 'n'.
-        new_position = position + 4.
-        FREE: json_element-value.
-    ENDCASE.
+    FIELD-SYMBOLS: <children>       TYPE t_json_element.
+
+    result = create_element_json( ).
+    ASSIGN result-children->* TO <children>.
+
+    result-type = zcl_json_encoder_decoder=>json_element_type-name.
+    FIND REGEX '\A\s*"(\w*)":'
+        IN SECTION OFFSET position OF json
+        MATCH LENGTH lv_expression_length
+        SUBMATCHES result-name.
+
+    position = position + lv_expression_length.
+
+    decode_string(
+      EXPORTING
+        json     = json
+      CHANGING
+        position = position
+        result   = result
+    ).
+
+*    IF lw_json_element IS NOT INITIAL.
+*      APPEND lw_json_element TO <children>.
+*    ENDIF.
 
   ENDMETHOD.
 
 
   METHOD decode_object.
 
-    DATA: lv_position             TYPE i,
-          lv_property_name_length TYPE i,
-          lv_property_name        TYPE string,
-          lw_json_element         TYPE json_element.
+    DATA: lw_json_element TYPE zcl_json_encoder_decoder=>json_element.
 
-    FIELD-SYMBOLS: <children>       TYPE t_json_element,
-                   <child_children> TYPE t_json_element,
-                   <element>        TYPE json_element.
+    FIELD-SYMBOLS: <children>       TYPE t_json_element.
 
-    json_element = create_element_json( ).
-    ASSIGN json_element-children->* TO <children>.
-    json_element-type = zcl_json_encoder_decoder=>json_element_type-object.
+    IF result-type NE zcl_json_encoder_decoder=>json_element_type-name.
+      result = create_element_json( ).
+    ENDIF.
 
-    lv_position = position.
+    result-type = zcl_json_encoder_decoder=>json_element_type-object.
+    ASSIGN result-children->* TO <children>.
 
     DO.
 
-      CASE json+lv_position(1).
+      CASE json+position(1).
         WHEN '}'.
-          new_position = lv_position + 1.
+          position = position + 1.
           EXIT.
         WHEN ','.
-          lv_position = lv_position + 1.
+          position = position + 1.
       ENDCASE.
 
-      FIND REGEX '\A\s*"([^:]*)"\s*:' IN SECTION OFFSET lv_position OF json
-                        MATCH OFFSET lv_position MATCH LENGTH lv_property_name_length
-                        SUBMATCHES lv_property_name.
+      decode_string(
+        EXPORTING
+          json     = json
+        CHANGING
+          position = position
+          result   = lw_json_element
+      ).
 
-      IF sy-subrc NE 0.
-
+      IF lw_json_element IS NOT INITIAL.
+        APPEND lw_json_element TO <children>.
       ENDIF.
-
-      lv_position = lv_position + lv_property_name_length.
-
-      lw_json_element = create_element_json( ).
-      lw_json_element-type = zcl_json_encoder_decoder=>json_element_type-attribute.
-      lw_json_element-value = lv_property_name.
-
-      APPEND lw_json_element TO <children> ASSIGNING <element>.
-
-      decode_element(
-          EXPORTING
-            json         = json
-            position     = lv_position
-          IMPORTING
-            json_element = lw_json_element
-            new_position = lv_position
-        ).
-
-      ASSIGN <element>-children->* TO <child_children>.
-      APPEND lw_json_element TO <child_children>.
-      new_position = lv_position.
+      CLEAR: lw_json_element.
 
     ENDDO.
 
   ENDMETHOD.
 
 
-  METHOD decode_string_value.
+  METHOD decode_string.
 
-    DATA: lv_value_lenght TYPE i.
+    IF position = strlen( json ).
+      RETURN.
+    ENDIF.
 
-    json_element-type = zcl_json_encoder_decoder=>json_element_type-value_string.
+    CASE json+position(1).
+      WHEN '{'. "Object
+        position = position + 1.
+        decode_object( EXPORTING
+                        json     = json
+                    CHANGING
+                        position = position
+                        result   = result ).
+      WHEN '['. "Array
+        position = position + 1.
+        decode_array( EXPORTING
+                        json     = json
+                    CHANGING
+                        position = position
+                        result   = result ).
+      WHEN '"'.
 
-    FIND REGEX '"([^"]*)"' IN SECTION OFFSET position OF json
-        MATCH OFFSET new_position MATCH LENGTH lv_value_lenght
-        SUBMATCHES json_element-value.
+        FIND REGEX '\A\s*"([^:]*)":("([^,]*)"|true|false|null)'
+            IN SECTION OFFSET position OF json.
 
-    new_position = position + lv_value_lenght.
+        IF sy-subrc EQ 0.
+          decode_attribute(
+                  EXPORTING
+                      json     = json
+                  CHANGING
+                      position = position
+                      result   = result ).
+          EXIT.
+        ENDIF.
+
+        decode_named_element(
+                  EXPORTING
+                      json     = json
+                  CHANGING
+                      position = position
+                      result   = result ).
+
+    ENDCASE.
+
   ENDMETHOD.
 
 
@@ -1148,6 +1178,35 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD timestamp_iso_to_sap.
+    DATA: date_iso TYPE string,
+          time_iso TYPE string,
+          tsc(14)  TYPE c.
+
+    SPLIT timestamp AT 'T' INTO date_iso time_iso.
+    CHECK sy-subrc = 0.
+
+    tsc(8) = date_iso_to_sap( date_iso ).
+    tsc+8(6) = time_iso_to_sap( time_iso ).
+    result = tsc.
+  ENDMETHOD.
+
+
+  METHOD time_iso_to_sap.
+    DATA: hour(2) TYPE n,
+          min(2)  TYPE n,
+          sec(2)  TYPE n.
+
+    "// ISO-8601 allowed formats:
+    "//  hh:mm:ss or hh:mm or hhmmss or hhmm or hh
+    FIND REGEX '(\d{2}):?(\d{2})?:?(\d{2})?' IN time_iso
+      SUBMATCHES hour min sec.
+
+    CONCATENATE hour min sec INTO result.
+
+  ENDMETHOD.
+
+
   METHOD transfer_to_public_attribute.
 
     IF options-use_public_attributes NE abap_true. RETURN. ENDIF.
@@ -1157,7 +1216,7 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
     FIELD-SYMBOLS: <attribute> TYPE any.
 
     attribute_name = handle_decode_case(
-                   value   = json_element-value
+                   value   = json_element-name
                    options = options
                ).
 
@@ -1256,7 +1315,7 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
 
   METHOD transfer_values_struct.
 
-    IF json_element-type NE json_element_type-object. RETURN. ENDIF.
+*    IF json_element-type NE json_element_type-object. RETURN. ENDIF.
 
     DATA: lv_attribute_name TYPE string.
 
@@ -1268,26 +1327,22 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
 
     LOOP AT <children> ASSIGNING <child>.
 
-      CASE <child>-type.
-        WHEN json_element_type-attribute.
+      lv_attribute_name = handle_decode_case(
+                            value   = <child>-name
+                            options = options ).
 
-          lv_attribute_name = handle_decode_case(
-                                value   = <child>-value
-                                options = options ).
+      ASSIGN COMPONENT lv_attribute_name OF STRUCTURE value TO <field>.
+      IF sy-subrc NE 0.
+        CONTINUE.
+      ENDIF.
 
-          ASSIGN COMPONENT lv_attribute_name OF STRUCTURE value TO <field>.
-          IF sy-subrc NE 0.
-            CONTINUE.
-          ENDIF.
-
-          transfer_values(
-            EXPORTING
-              json_element = <child>
-              options      = options
-            CHANGING
-              value        = <field>
-          ).
-      ENDCASE.
+      transfer_values(
+        EXPORTING
+          json_element = <child>
+          options      = options
+        CHANGING
+          value        = <field>
+      ).
 
     ENDLOOP.
 
@@ -1391,20 +1446,17 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
           lt_params   TYPE abap_parmbind_tab.
 
     FIELD-SYMBOLS: <method>      LIKE LINE OF objdescr->methods,
-                   <param_descr> TYPE abap_parmdescr,
-                   <value>       TYPE json_element,
-                   <children>    TYPE t_json_element.
+                   <param_descr> TYPE abap_parmdescr.
 
     refdescr ?= reftype.
     objdescr ?= refdescr->get_referenced_type( ).
     o_obj     = value.
-    ASSIGN json_element-children->* TO <children>.
 
     lt_methods = objdescr->methods.
     SORT lt_methods BY name visibility.
 
     method_name = handle_decode_case(
-                  value   = json_element-value
+                  value   = json_element-name
                   options = options
               ).
 
@@ -1430,15 +1482,15 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    READ TABLE <children> ASSIGNING <value> INDEX 1.
-
-    IF sy-subrc NE 0.
-      RETURN.
-    ENDIF.
+*    READ TABLE <children> ASSIGNING <value> INDEX 1.
+*
+*    IF sy-subrc NE 0.
+*      RETURN.
+*    ENDIF.
 
     lw_param-name   = <param_descr>-name.
     lw_param-kind   = cl_abap_objectdescr=>exporting.
-    GET REFERENCE OF <value>-value INTO lw_param-value.
+    GET REFERENCE OF json_element-value INTO lw_param-value.
     INSERT lw_param INTO TABLE lt_params.
 
     CALL METHOD o_obj->(<method>-name)
@@ -1449,36 +1501,29 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
 
   METHOD transfer_value_string.
 
-    FIELD-SYMBOLS: <children> TYPE t_json_element,
-                   <child>    TYPE json_element.
-
-    ASSIGN json_element-children->* TO <children>.
-
-    READ TABLE <children> ASSIGNING <child> INDEX 1.
-
     IF reftype->get_relative_name( ) EQ 'TIMESTAMP'.
-      value = timestamp_iso_to_sap( <child>-value ).
+      value = timestamp_iso_to_sap( json_element-value ).
       RETURN.
     ENDIF.
 
     CASE reftype->type_kind.
       WHEN cl_abap_typedescr=>typekind_date.
-        value = date_iso_to_sap( <child>-value ).
+        value = date_iso_to_sap( json_element-value ).
       WHEN cl_abap_typedescr=>typekind_time.
-        value = time_iso_to_sap( <child>-value ).
+        value = time_iso_to_sap( json_element-value ).
       WHEN OTHERS.
-        CASE <child>-type.
-          WHEN json_element_type-value_boolean.
-
-            CASE <child>-value.
+        CASE json_element-type.
+          WHEN json_element_type-special_value.
+            CASE json_element-value.
               WHEN 'false'.
                 value = abap_false.
               WHEN 'true'.
                 value = abap_true.
+              WHEN 'null'.
+                CLEAR: value.
             ENDCASE.
-
           WHEN OTHERS.
-            value = <child>-value.
+            value = json_element-value.
         ENDCASE.
     ENDCASE.
 
@@ -1515,56 +1560,4 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
     ENDIF.
     result = abap_true.
   ENDMETHOD.
-
-  METHOD timestamp_iso_to_sap.
-    DATA: date_iso TYPE string,
-          time_iso TYPE string,
-          tsc(14)  TYPE c.
-
-    SPLIT timestamp AT 'T' INTO date_iso time_iso.
-    CHECK sy-subrc = 0.
-
-    tsc(8) = date_iso_to_sap( date_iso ).
-    tsc+8(6) = time_iso_to_sap( time_iso ).
-    result = tsc.
-  ENDMETHOD.
-
-
-  METHOD date_iso_to_sap.
-    DATA: year(4)  TYPE n,
-          month(2) TYPE n,
-          day(2)   TYPE n.
-
-    "// ISO-8601 allowed formats:
-    "//  YYYY-MM-DD or YYYYMMDD or YYYY-MM
-    FIND REGEX '(\d{4})-?(\d{2})-?(\d{2})?' IN date_iso
-      SUBMATCHES year month day.
-    IF year IS INITIAL AND
-       month IS INITIAL AND
-       day IS INITIAL.
-      RETURN.
-    ENDIF.
-    IF day IS INITIAL.
-      day = 1.
-    ENDIF.
-
-    CONCATENATE year month day INTO result.
-
-  ENDMETHOD.
-
-
-  METHOD time_iso_to_sap.
-    DATA: hour(2) TYPE n,
-          min(2)  TYPE n,
-          sec(2)  TYPE n.
-
-    "// ISO-8601 allowed formats:
-    "//  hh:mm:ss or hh:mm or hhmmss or hhmm or hh
-    FIND REGEX '(\d{2}):?(\d{2})?:?(\d{2})?' IN time_iso
-      SUBMATCHES hour min sec.
-
-    CONCATENATE hour min sec INTO result.
-
-  ENDMETHOD.
-
 ENDCLASS.

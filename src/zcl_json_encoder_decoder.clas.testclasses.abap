@@ -372,7 +372,12 @@ CLASS ltcl_json_decode DEFINITION FINAL FOR TESTING
           json     TYPE clike
           expected TYPE any
         CHANGING
-          actual   TYPE any.
+          actual   TYPE any,
+
+      check_attribute
+        IMPORTING
+          json TYPE string
+          exp  TYPE string.
 
     METHODS:
       struct                            FOR TESTING,
@@ -383,12 +388,11 @@ CLASS ltcl_json_decode DEFINITION FINAL FOR TESTING
       object_fill_public_attributes     FOR TESTING,
       object_fill_by_methods            FOR TESTING,
       obj_fill_complex_name             FOR TESTING,
-      boolean_false                     FOR TESTING,
-      boolean_true                      FOR TESTING,
-      null                              FOR TESTING,
       timestamp                         FOR TESTING,
       date                              FOR TESTING,
-      time                              FOR TESTING.
+      time                              FOR TESTING,
+      simple_attribute                  FOR TESTING,
+      nested_named_struct               FOR TESTING.
 
 ENDCLASS.
 
@@ -423,7 +427,7 @@ CLASS ltcl_json_decode IMPLEMENTATION.
         json_string = json
         options      = options
       CHANGING
-        value       = actual
+        result       = actual
     ).
 
     cl_abap_unit_assert=>assert_equals(
@@ -487,7 +491,7 @@ CLASS ltcl_json_decode IMPLEMENTATION.
         json_string = '{"publicName":"test"}'
         options      = options
       CHANGING
-        value       = lo_object
+        result       = lo_object
     ).
 
     cl_abap_unit_assert=>assert_equals(
@@ -510,7 +514,7 @@ CLASS ltcl_json_decode IMPLEMENTATION.
         json_string = '{"name":"test"}'
         options     = options
       CHANGING
-        value       = lo_object
+        result       = lo_object
     ).
 
     cl_abap_unit_assert=>assert_equals(
@@ -533,7 +537,7 @@ CLASS ltcl_json_decode IMPLEMENTATION.
         json_string = '{"complexName":"test"}'
         options     = options
       CHANGING
-        value       = lo_object
+        result       = lo_object
     ).
 
     cl_abap_unit_assert=>assert_equals(
@@ -542,51 +546,6 @@ CLASS ltcl_json_decode IMPLEMENTATION.
         exp = 'test'
     ).
 
-  ENDMETHOD.
-
-  METHOD boolean_false.
-
-    DATA: expected TYPE test_struct,
-          actual   TYPE test_struct.
-
-    options-camelcase   = abap_true.
-    expected-valid = ''.
-
-    check_scenario( EXPORTING
-                        json = '{"valid":false}'
-                        expected = expected
-                    CHANGING
-                        actual   = actual ).
-
-  ENDMETHOD.
-
-  METHOD boolean_true.
-
-    DATA: expected TYPE test_struct,
-          actual   TYPE test_struct.
-
-    options-camelcase   = abap_true.
-    expected-valid = 'X'.
-
-    check_scenario( EXPORTING
-                        json = '{"valid":true}'
-                        expected = expected
-                    CHANGING
-                        actual   = actual ).
-  ENDMETHOD.
-
-  METHOD null.
-
-    DATA: expected TYPE test_struct,
-          actual   TYPE test_struct.
-
-    options-camelcase   = abap_true.
-
-    check_scenario( EXPORTING
-                        json = '{"other":null}'
-                        expected = expected
-                    CHANGING
-                        actual   = actual ).
   ENDMETHOD.
 
   METHOD timestamp.
@@ -684,7 +643,7 @@ CLASS ltcl_json_decode IMPLEMENTATION.
         json_string = '{"fieldName":"test","names":[{"name":"test"}]}'
         options     = options
       CHANGING
-        value       = actual
+        result       = actual
     ).
 
     cl_abap_unit_assert=>assert_equals(
@@ -706,6 +665,64 @@ CLASS ltcl_json_decode IMPLEMENTATION.
             act = obj->get_name( )
             exp = 'test'
     ).
+  ENDMETHOD.
+
+  METHOD simple_attribute.
+    check_attribute( json = '{"simple":"value"}' exp = 'value' ).
+    check_attribute( json = '{"simple":true}' exp = 'X' ).
+    check_attribute( json = '{"simple":false}' exp = '' ).
+    check_attribute( json = '{"simple":null}' exp = '' ).
+  ENDMETHOD.
+
+
+  METHOD check_attribute.
+
+    TYPES:
+      BEGIN OF struct,
+        simple TYPE string,
+      END OF struct.
+
+    DATA: decoded TYPE struct.
+
+    options-camelcase = abap_true.
+    o_cut->decode(
+      EXPORTING
+        json_string = json
+        options     = options
+      CHANGING
+        result       = decoded
+    ).
+
+    cl_abap_unit_assert=>assert_equals( msg = 'should returns filled struct'
+                                        exp = decoded-simple
+                                        act = exp ).
+
+  ENDMETHOD.
+
+  METHOD nested_named_struct.
+
+    TYPES:
+      BEGIN OF nested,
+        name TYPE string,
+      END OF nested,
+      BEGIN OF main,
+        nested TYPE nested,
+      END OF main.
+
+    DATA: decoded TYPE main.
+
+    o_cut->decode(
+      EXPORTING
+        json_string = '{"nested":{"name":"test"}}'
+        options     = options
+      CHANGING
+        result       = decoded
+    ).
+
+    cl_abap_unit_assert=>assert_equals( msg = 'Should returns filled struct'
+                                        exp = 'test'
+                                        act = decoded-nested-name ).
+
   ENDMETHOD.
 
 ENDCLASS.
