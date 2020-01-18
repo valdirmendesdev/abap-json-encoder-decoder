@@ -166,9 +166,6 @@ CLASS zcl_json_encoder_decoder DEFINITION
           options       TYPE zcl_json_encoder_decoder=>options
         RETURNING
           VALUE(result) TYPE string,
-      create_element_json
-        RETURNING
-          VALUE(result) TYPE zcl_json_encoder_decoder=>json_element,
       transfer_values
         IMPORTING
           json_element TYPE zcl_json_encoder_decoder=>json_element
@@ -241,34 +238,6 @@ CLASS zcl_json_encoder_decoder DEFINITION
           time_iso      TYPE string
         RETURNING
           VALUE(result) TYPE string,
-      decode_string
-        IMPORTING json     TYPE string
-        CHANGING  position TYPE i
-                  result   TYPE zcl_json_encoder_decoder=>json_element,
-      decode_object
-        IMPORTING
-          json     TYPE string
-        CHANGING
-          position TYPE i
-          result   TYPE zcl_json_encoder_decoder=>json_element,
-      decode_attribute
-        IMPORTING
-          json     TYPE string
-        CHANGING
-          position TYPE i
-          result   TYPE zcl_json_encoder_decoder=>json_element,
-      decode_named_element
-        IMPORTING
-          json     TYPE string
-        CHANGING
-          position TYPE i
-          result   TYPE zcl_json_encoder_decoder=>json_element,
-      decode_array
-        IMPORTING
-          json     TYPE string
-        CHANGING
-          position TYPE i
-          result   TYPE zcl_json_encoder_decoder=>json_element,
       remove_special_characters
         IMPORTING
           input         TYPE clike
@@ -296,12 +265,6 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
     APPEND lo_regex TO me->patterns.
 
   ENDMETHOD.
-
-
-  METHOD create_element_json.
-    CREATE DATA result-children TYPE t_json_element.
-  ENDMETHOD.
-
 
   METHOD date_iso_to_sap.
     DATA: year(4)  TYPE n,
@@ -364,203 +327,9 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
 
   ENDMETHOD.
 
-
-  METHOD decode_array.
-
-    DATA: lw_json_element TYPE zcl_json_encoder_decoder=>json_element.
-
-    FIELD-SYMBOLS: <children>       TYPE t_json_element.
-
-    IF result-type NE zcl_json_encoder_decoder=>json_element_type-name.
-      result = create_element_json( ).
-    ENDIF.
-    result-type = zcl_json_encoder_decoder=>json_element_type-array.
-    ASSIGN result-children->* TO <children>.
-
-    DO.
-
-      CASE json+position(1).
-        WHEN ']'.
-          position = position + 1.
-          EXIT.
-        WHEN ','.
-          position = position + 1.
-      ENDCASE.
-
-      decode_string(
-        EXPORTING
-          json     = json
-        CHANGING
-          position = position
-          result   = lw_json_element
-      ).
-
-      IF lw_json_element IS NOT INITIAL.
-        APPEND lw_json_element TO <children>.
-      ENDIF.
-      CLEAR: lw_json_element.
-
-    ENDDO.
-
-  ENDMETHOD.
-
-
-  METHOD decode_attribute.
-
-    DATA: lv_expression_length TYPE i,
-          lv_match1            TYPE string,
-          lv_match2            TYPE string.
-
-    result-type = zcl_json_encoder_decoder=>json_element_type-attribute.
-
-    FIND REGEX '\A\s*"([^:]*)":("([^,]*)"|true|false|null)'
-        IN SECTION OFFSET position OF json
-        MATCH LENGTH lv_expression_length
-              SUBMATCHES result-name lv_match1 lv_match2.
-
-    IF lv_match2 IS NOT INITIAL.
-      result-value = lv_match2.
-    ELSE.
-
-      CASE lv_match1.
-        WHEN 'true' OR 'false' OR 'null'.
-          result-type = zcl_json_encoder_decoder=>json_element_type-special_value.
-          result-value = lv_match1.
-        WHEN '""'.
-          CLEAR result-value.
-      ENDCASE.
-    ENDIF.
-
-    position = position + lv_expression_length.
-
-  ENDMETHOD.
-
-
   METHOD decode_camelcase.
     result = value.
     REPLACE ALL OCCURRENCES OF REGEX `([a-z])([A-Z])` IN result WITH `$1_$2`.
-  ENDMETHOD.
-
-
-  METHOD decode_named_element.
-
-    DATA: lw_json_element      TYPE zcl_json_encoder_decoder=>json_element,
-          lv_expression_length TYPE i.
-
-    FIELD-SYMBOLS: <children>       TYPE t_json_element.
-
-    result = create_element_json( ).
-    ASSIGN result-children->* TO <children>.
-
-    result-type = zcl_json_encoder_decoder=>json_element_type-name.
-    FIND REGEX '\A\s*"(\w*)":'
-        IN SECTION OFFSET position OF json
-        MATCH LENGTH lv_expression_length
-        SUBMATCHES result-name.
-
-    position = position + lv_expression_length.
-
-    decode_string(
-      EXPORTING
-        json     = json
-      CHANGING
-        position = position
-        result   = result
-    ).
-
-*    IF lw_json_element IS NOT INITIAL.
-*      APPEND lw_json_element TO <children>.
-*    ENDIF.
-
-  ENDMETHOD.
-
-
-  METHOD decode_object.
-
-    DATA: lw_json_element TYPE zcl_json_encoder_decoder=>json_element.
-
-    FIELD-SYMBOLS: <children>       TYPE t_json_element.
-
-    IF result-type NE zcl_json_encoder_decoder=>json_element_type-name.
-      result = create_element_json( ).
-    ENDIF.
-
-    result-type = zcl_json_encoder_decoder=>json_element_type-object.
-    ASSIGN result-children->* TO <children>.
-
-    DO.
-
-      CASE json+position(1).
-        WHEN '}'.
-          position = position + 1.
-          EXIT.
-        WHEN ','.
-          position = position + 1.
-      ENDCASE.
-
-      decode_string(
-        EXPORTING
-          json     = json
-        CHANGING
-          position = position
-          result   = lw_json_element
-      ).
-
-      IF lw_json_element IS NOT INITIAL.
-        APPEND lw_json_element TO <children>.
-      ENDIF.
-      CLEAR: lw_json_element.
-
-    ENDDO.
-
-  ENDMETHOD.
-
-
-  METHOD decode_string.
-
-    IF position = strlen( json ).
-      RETURN.
-    ENDIF.
-
-    CASE json+position(1).
-      WHEN '{'. "Object
-        position = position + 1.
-        decode_object( EXPORTING
-                        json     = json
-                    CHANGING
-                        position = position
-                        result   = result ).
-      WHEN '['. "Array
-        position = position + 1.
-        decode_array( EXPORTING
-                        json     = json
-                    CHANGING
-                        position = position
-                        result   = result ).
-      WHEN '"'.
-
-        FIND REGEX '\A\s*"([^:]*)":("([^,]*)"|true|false|null)'
-            IN SECTION OFFSET position OF json.
-
-        IF sy-subrc EQ 0.
-          decode_attribute(
-                  EXPORTING
-                      json     = json
-                  CHANGING
-                      position = position
-                      result   = result ).
-          EXIT.
-        ENDIF.
-
-        decode_named_element(
-                  EXPORTING
-                      json     = json
-                  CHANGING
-                      position = position
-                      result   = result ).
-
-    ENDCASE.
-
   ENDMETHOD.
 
 
