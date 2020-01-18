@@ -671,7 +671,8 @@ CLASS ltcl_json_decode IMPLEMENTATION.
     check_attribute( json = '{"simple":"value"}' exp = 'value' ).
     check_attribute( json = '{"simple":true}' exp = 'X' ).
     check_attribute( json = '{"simple":false}' exp = '' ).
-    check_attribute( json = '{"simple":null}' exp = '' ).
+*    check_attribute( json = '{"simple":null}' exp = '' ).
+*    check_attribute( json = '{"$simple":"value"}' exp = 'value' ).
   ENDMETHOD.
 
 
@@ -722,6 +723,315 @@ CLASS ltcl_json_decode IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( msg = 'Should returns filled struct'
                                         exp = 'test'
                                         act = decoded-nested-name ).
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+CLASS json_structure DEFINITION.
+
+  PUBLIC SECTION.
+
+    METHODS:
+      add_element
+        IMPORTING
+          type  TYPE char1
+          name  TYPE string OPTIONAL
+          value TYPE string OPTIONAL,
+      get_structure
+        RETURNING
+          VALUE(result) TYPE scanner=>json_element,
+      level_up_element.
+
+  PROTECTED SECTION.
+  PRIVATE SECTION.
+
+    DATA: actual_element TYPE REF TO data,
+          elements       TYPE STANDARD TABLE OF REF TO data.
+    METHODS create_element
+      IMPORTING
+        type          TYPE char1
+        name          TYPE string
+        value         TYPE string
+      RETURNING
+        VALUE(result) TYPE REF TO data.
+    METHODS initialize_element
+      IMPORTING
+        type    TYPE char1
+        name    TYPE string
+        value   TYPE string
+      CHANGING
+        element TYPE scanner=>json_element.
+
+ENDCLASS.
+
+CLASS json_structure IMPLEMENTATION.
+
+  METHOD add_element.
+
+    IF me->actual_element IS NOT BOUND.
+      me->actual_element = create_element( type  = type
+                                           name  = name
+                                           value = value ).
+      APPEND me->actual_element TO me->elements.
+      RETURN.
+    ENDIF.
+
+    FIELD-SYMBOLS:
+      <elements> TYPE scanner=>t_json_element,
+      <element>  TYPE scanner=>json_element,
+      <actual>   TYPE scanner=>json_element.
+
+    ASSIGN:
+     me->actual_element->* TO <element>,
+     <element>-children->* TO <elements>.
+
+    APPEND INITIAL LINE TO <elements> ASSIGNING <actual>.
+    initialize_element(
+      EXPORTING
+        type    = type
+        name    = name
+        value   = value
+      CHANGING
+        element = <actual>
+    ).
+    GET REFERENCE OF <actual> INTO me->actual_element.
+    APPEND me->actual_element TO me->elements.
+
+  ENDMETHOD.
+
+
+  METHOD create_element.
+    FIELD-SYMBOLS: <json_element> TYPE scanner=>json_element.
+    CREATE DATA: result TYPE scanner=>json_element.
+    ASSIGN result->* TO <json_element>.
+    initialize_element(
+        EXPORTING
+            type  = type
+            name  = name
+            value = value
+        CHANGING
+            element = <json_element> ).
+  ENDMETHOD.
+
+
+  METHOD get_structure.
+    DATA: ref_first TYPE REF TO data.
+    FIELD-SYMBOLS: <result> LIKE result.
+
+    READ TABLE me->elements INTO ref_first INDEX 1.
+    IF sy-subrc NE 0.
+      RETURN.
+    ENDIF.
+    ASSIGN ref_first->* TO <result>.
+    result = <result>.
+  ENDMETHOD.
+
+
+  METHOD initialize_element.
+    CREATE DATA element-children TYPE scanner=>t_json_element.
+    element-type     = type.
+    element-name     = name.
+    element-value    = value.
+  ENDMETHOD.
+
+
+  METHOD level_up_element.
+
+    IF lines( me->elements ) <= 1.
+      RETURN.
+    ENDIF.
+
+    READ TABLE me->elements INTO me->actual_element INDEX lines( me->elements )  - 1.
+    DELETE me->elements INDEX lines( me->elements ).
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+CLASS ltcl_scanner DEFINITION FINAL FOR TESTING
+  DURATION SHORT
+  RISK LEVEL HARMLESS.
+
+  PRIVATE SECTION.
+
+    DATA: cut            TYPE REF TO scanner,
+          json_structure TYPE REF TO json_structure.
+
+    METHODS:
+      setup,
+
+      check_json_element_tree
+        IMPORTING expected      TYPE scanner=>json_element
+                  actual        TYPE scanner=>json_element
+        RETURNING VALUE(result) TYPE abap_bool.
+
+    METHODS:
+      is_valid                          FOR TESTING RAISING cx_static_check,
+      object_json_tree_structure        FOR TESTING RAISING cx_static_check.
+
+ENDCLASS.
+
+CLASS ltcl_scanner IMPLEMENTATION.
+
+  METHOD setup.
+    cut = NEW #( ).
+  ENDMETHOD.
+
+  METHOD is_valid.
+
+    TYPES:
+      BEGIN OF valid_test,
+        json TYPE string,
+        ok   TYPE abap_bool,
+      END OF valid_test.
+
+    DATA: valid_tests TYPE STANDARD TABLE OF valid_test.
+
+    valid_tests = VALUE #( ( json = 'foo' ok = abap_false )
+                           ( json = '}{' ok = abap_false )
+                           ( json = '{]' ok = abap_false )
+                           ( json = '{}' ok = abap_true )
+                           ( json = '{"foo":"bar"}' ok = abap_true )
+                           ( json = '{"foo":"bar","bar":{"baz":["qux"]}}' ok = abap_true ) ).
+
+    LOOP AT valid_tests ASSIGNING FIELD-SYMBOL(<test>).
+
+      cl_abap_unit_assert=>assert_equals(
+        EXPORTING
+            act = cut->valid( <test>-json )
+            exp = <test>-ok
+            msg = |Json: { <test>-json } expected ok: { <test>-ok }| ).
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD object_json_tree_structure.
+
+    TYPES:
+      BEGIN OF test_instance,
+        json     TYPE string,
+        expected TYPE scanner=>json_element,
+      END OF test_instance.
+
+    DATA: test_instances TYPE STANDARD TABLE OF test_instance,
+          json_element   TYPE scanner=>json_element.
+
+    "Scenario: simple json
+    json_structure = NEW #( ).
+    json_structure->add_element( type = scanner=>json_element_type-object ).
+    APPEND VALUE #( json = '{}' expected = json_structure->get_structure( ) ) TO test_instances.
+
+    "Scenario: simple json with attributes
+    json_structure = NEW #( ).
+    json_structure->add_element( type = scanner=>json_element_type-object ).
+    json_structure->add_element(
+      EXPORTING
+        type  = scanner=>json_element_type-attribute
+        name  = 'atr'
+        value = 'value'
+    ).
+    APPEND VALUE #( json = '{"atr":"value"}' expected = json_structure->get_structure( ) ) TO test_instances.
+
+    json_structure = NEW #( ).
+    json_structure->add_element( type = scanner=>json_element_type-object ).
+    json_structure->add_element(
+      EXPORTING
+        type  = scanner=>json_element_type-attribute
+        name  = 'atr'
+        value = 'value'
+    ).
+    json_structure->level_up_element( ).
+    json_structure->add_element(
+      EXPORTING
+        type  = scanner=>json_element_type-name
+        name  = 'test'
+*        value =
+    ).
+    json_structure->add_element(
+      EXPORTING
+        type  = scanner=>json_element_type-array
+*        name  =
+*        value =
+    ).
+    json_structure->add_element(
+      EXPORTING
+        type  = scanner=>json_element_type-object
+*        name  =
+*        value =
+    ).
+    json_structure->add_element(
+      EXPORTING
+        type  = scanner=>json_element_type-attribute
+        name  = 'foo'
+        value = 'bar'
+    ).
+    APPEND VALUE #( json = '{"atr":"value","test":[{"foo":"bar"}]}'
+                    expected = json_structure->get_structure( ) ) TO test_instances.
+
+    LOOP AT test_instances ASSIGNING FIELD-SYMBOL(<test>).
+
+      cut->valid( json = <test>-json ).
+      json_element = cut->get_json_element_tree( ).
+
+      cl_abap_unit_assert=>assert_true(
+        EXPORTING
+          act = check_json_element_tree( expected = <test>-expected
+                                         actual   = json_element )
+          msg = |Scenario: { <test>-json }|
+      ).
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD check_json_element_tree.
+
+    FIELD-SYMBOLS:
+      <actual_children>   TYPE scanner=>t_json_element,
+      <expected_children> TYPE scanner=>t_json_element,
+      <expected>          TYPE scanner=>json_element,
+      <actual>            TYPE scanner=>json_element.
+
+    result = abap_true.
+
+    IF expected-type NE actual-type.
+      result = abap_false.
+      RETURN.
+    ENDIF.
+
+    IF expected-name NE actual-name.
+      result = abap_false.
+      RETURN.
+    ENDIF.
+
+    IF expected-value NE actual-value.
+      result = abap_false.
+      RETURN.
+    ENDIF.
+
+    ASSIGN: expected-children->* TO <expected_children>,
+            actual-children->* TO <actual_children>.
+
+    IF lines( <expected_children> ) NE lines( <actual_children> ).
+      result = abap_false.
+      RETURN.
+    ENDIF.
+
+    LOOP AT <expected_children> ASSIGNING <expected>.
+
+      READ TABLE <actual_children> ASSIGNING <actual> INDEX sy-tabix.
+
+      result = check_json_element_tree( expected = <expected>
+                                        actual   = <actual> ).
+
+      IF result EQ abap_false.
+        RETURN.
+      ENDIF.
+
+    ENDLOOP.
 
   ENDMETHOD.
 

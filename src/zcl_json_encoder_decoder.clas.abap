@@ -40,7 +40,6 @@ CLASS zcl_json_encoder_decoder DEFINITION
         object        TYPE char1 VALUE 'o',
         array         TYPE char1 VALUE 'r',
         attribute     TYPE char1 VALUE 'a',
-        value_string  TYPE char1 VALUE 's',
         special_value TYPE char1 VALUE 'b',
         name          TYPE char1 VALUE 'n',
       END OF json_element_type.
@@ -269,7 +268,12 @@ CLASS zcl_json_encoder_decoder DEFINITION
           json     TYPE string
         CHANGING
           position TYPE i
-          result   TYPE zcl_json_encoder_decoder=>json_element.
+          result   TYPE zcl_json_encoder_decoder=>json_element,
+      remove_special_characters
+        IMPORTING
+          input         TYPE clike
+        RETURNING
+          VALUE(result) TYPE string.
 
 ENDCLASS.
 
@@ -333,16 +337,23 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
     REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>vertical_tab IN condensed_string WITH ''.
     REPLACE ALL OCCURRENCES OF REGEX '(\\t|\\r|\\n|\\f)' IN condensed_string WITH ''.
     REPLACE ALL OCCURRENCES OF REGEX '\\"' IN condensed_string WITH '"'.
-    CONDENSE condensed_string NO-GAPS.
+    CONDENSE condensed_string.
 
     DATA: lv_position TYPE i.
 
-    decode_string(
-        EXPORTING
-            json     = condensed_string
-        CHANGING
-            position = lv_position
-            result   = lw_decoded ).
+*    decode_string(
+*        EXPORTING
+*            json     = condensed_string
+*        CHANGING
+*            position = lv_position
+*            result   = lw_decoded ).
+
+    DATA: scanner TYPE REF TO scanner.
+    scanner = NEW #( ).
+    IF scanner->valid( condensed_string ) EQ abap_false.
+      RETURN.
+    ENDIF.
+    lw_decoded = scanner->get_json_element_tree( ).
 
     transfer_values(
        EXPORTING
@@ -1117,6 +1128,8 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
 
     result = value.
 
+    result = remove_special_characters( result ).
+
     IF options-camelcase EQ abap_true.
       result = decode_camelcase( value = result ).
     ENDIF.
@@ -1315,8 +1328,6 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
 
   METHOD transfer_values_struct.
 
-*    IF json_element-type NE json_element_type-object. RETURN. ENDIF.
-
     DATA: lv_attribute_name TYPE string.
 
     FIELD-SYMBOLS: <children> TYPE t_json_element,
@@ -1324,6 +1335,11 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
                    <field>    TYPE any.
 
     ASSIGN json_element-children->* TO <children>.
+
+    READ TABLE <children> ASSIGNING <child> INDEX 1.
+    IF sy-subrc EQ 0 AND <child>-type = json_element_type-object.
+      ASSIGN <child>-children->* TO <children>.
+    ENDIF.
 
     LOOP AT <children> ASSIGNING <child>.
 
@@ -1560,4 +1576,29 @@ CLASS zcl_json_encoder_decoder IMPLEMENTATION.
     ENDIF.
     result = abap_true.
   ENDMETHOD.
+
+  METHOD remove_special_characters.
+
+    DATA: input_string  TYPE fist-searchw,
+          output_string TYPE fist-searchw.
+
+    input_string = input.
+
+    CALL FUNCTION 'SF_SPECIALCHAR_DELETE'
+      EXPORTING
+        with_specialchar    = input_string    " Entered character string
+      IMPORTING
+        without_specialchar = output_string    " Compressed character string withou
+      EXCEPTIONS
+        result_word_empty   = 1
+        OTHERS              = 2.
+    IF sy-subrc <> 0.
+      result = input.
+      RETURN.
+    ENDIF.
+
+    result = output_string.
+
+  ENDMETHOD.
+
 ENDCLASS.
