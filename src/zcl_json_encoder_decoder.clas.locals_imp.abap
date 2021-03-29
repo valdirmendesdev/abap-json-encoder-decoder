@@ -36,6 +36,7 @@ CLASS scanner DEFINITION.
         end_top               TYPE string VALUE 'END_TOP',
         end_value             TYPE string VALUE 'END_VALUE',
         in_string             TYPE string VALUE 'IN_STRING',
+        in_string_esc         TYPE string VALUE 'IN_STRING_ESC',
         neg                   TYPE string VALUE 'NEG',
         zero                  TYPE string VALUE 'ZERO',
         numeric               TYPE string VALUE 'NUMERIC',
@@ -53,7 +54,7 @@ CLASS scanner DEFINITION.
         fals                  TYPE string VALUE 'FALS',
         n                     TYPE string VALUE 'N',
         nu                    TYPE string VALUE 'NU',
-        nul                   TYPE string VALUE 'NUl',
+        nul                   TYPE string VALUE 'NUL',
       END OF steps,
 
       BEGIN OF parse_states,
@@ -78,6 +79,7 @@ CLASS scanner DEFINITION.
       END OF scan_result.
 
     METHODS:
+
       valid
         IMPORTING json            TYPE string
         RETURNING VALUE(is_valid) TYPE abap_bool,
@@ -86,6 +88,8 @@ CLASS scanner DEFINITION.
         RETURNING VALUE(result) TYPE scanner=>json_element.
 
   PROTECTED SECTION.
+
+
   PRIVATE SECTION.
 
     DATA: is_end_top              TYPE abap_bool,
@@ -156,6 +160,10 @@ CLASS scanner DEFINITION.
         RETURNING VALUE(result) TYPE i,
 
       in_string
+        IMPORTING character     TYPE c
+        RETURNING VALUE(result) TYPE i,
+
+      in_string_esc
         IMPORTING character     TYPE c
         RETURNING VALUE(result) TYPE i,
 
@@ -257,18 +265,22 @@ CLASS scanner DEFINITION.
         IMPORTING
           type TYPE char1,
 
-      pop_json_element.
+      pop_json_element,
+
+      get_actual_json_element
+        RETURNING VALUE(result) TYPE scanner=>json_element,
+
+      get_actual_json_element_type
+        RETURNING VALUE(result) TYPE char1.
 
 ENDCLASS.
 
 CLASS scanner IMPLEMENTATION.
 
   METHOD valid.
-
     IF me->check_is_valid( json ) IS INITIAL.
       is_valid = abap_true.
     ENDIF.
-
   ENDMETHOD.
 
 
@@ -366,7 +378,11 @@ CLASS scanner IMPLEMENTATION.
       WHEN '"'.
         me->step_name = steps-in_string.
         result = scan_result-begin_literal.
-        me->change_json_element_type( type = json_element_type-attribute ).
+        IF me->get_actual_json_element_type( ) EQ json_element_type-array.
+          me->append_json_element( type = json_element_type-attribute ).
+        ELSE.
+          me->change_json_element_type( type = json_element_type-attribute ).
+        ENDIF.
         RETURN.
       WHEN '-'.
         me->step_name = steps-neg.
@@ -416,11 +432,9 @@ CLASS scanner IMPLEMENTATION.
 
 
   METHOD is_space.
-
     IF character EQ ' '.
       result = abap_true.
     ENDIF.
-
   ENDMETHOD.
 
   METHOD begin_string_or_empty.
@@ -476,9 +490,13 @@ CLASS scanner IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    DATA: lv_parse_state TYPE i.
+    DATA: lv_parse_state         TYPE i,
+          json_element           TYPE json_element,
+          last_parse_state_index TYPE i.
 
-    READ TABLE me->parse_state INTO lv_parse_state INDEX lines( me->parse_state ).
+    last_parse_state_index = lines( me->parse_state ).
+
+    READ TABLE me->parse_state INTO lv_parse_state INDEX last_parse_state_index.
 
     CASE lv_parse_state.
       WHEN parse_states-object_key.
@@ -499,6 +517,9 @@ CLASS scanner IMPLEMENTATION.
         IF character EQ ','.
           me->change_last_parse_state( parse_states-object_key ).
           me->pop_json_element( ).
+          IF me->get_actual_json_element_type( ) EQ json_element_type-name.
+            me->pop_json_element( ).
+          ENDIF.
           me->step_name = steps-begin_string.
           result = scan_result-object_value.
           RETURN.
@@ -506,7 +527,12 @@ CLASS scanner IMPLEMENTATION.
 
         IF character EQ '}'.
           me->pop_parse_state( ).
-          me->pop_json_element( ).
+          me->pop_json_element( ). "Up to object
+          json_element = get_actual_json_element( ).
+          IF json_element-type EQ json_element_type-attribute OR
+             json_element-type EQ json_element_type-name.
+            me->pop_json_element( ).
+          ENDIF.
           result = scan_result-object_value.
           RETURN.
         ENDIF.
@@ -517,6 +543,14 @@ CLASS scanner IMPLEMENTATION.
          ).
         RETURN.
       WHEN parse_states-array_value.
+
+        IF me->get_actual_json_element_type( ) EQ json_element_type-attribute.
+          me->change_json_element_type( json_element_type-value_string ).
+          json_element = me->get_actual_json_element( ).
+          json_element-value = json_element-name.
+          FREE: json_element-name.
+        ENDIF.
+
         IF character EQ ','.
           me->step_name = steps-begin_value.
           result = scan_result-array_value.
@@ -557,7 +591,6 @@ CLASS scanner IMPLEMENTATION.
 
 
   METHOD gen_error.
-
     CONCATENATE 'invalid character'
                 character
                 context
@@ -568,12 +601,16 @@ CLASS scanner IMPLEMENTATION.
 
 
   METHOD change_last_parse_state.
-    MODIFY me->parse_state FROM parse_state INDEX lines( me->parse_state ).
+    DATA: last_parse_state_index TYPE i.
+    last_parse_state_index = lines( me->parse_state ).
+    MODIFY me->parse_state FROM parse_state INDEX last_parse_state_index.
   ENDMETHOD.
 
 
   METHOD pop_parse_state.
-    DELETE me->parse_state INDEX lines( me->parse_state ).
+    DATA: last_parse_state_index TYPE i.
+    last_parse_state_index = lines( me->parse_state ).
+    DELETE me->parse_state INDEX last_parse_state_index.
 
     IF lines( me->parse_state ) EQ 0.
       me->step_name = steps-end_top.
@@ -598,6 +635,12 @@ CLASS scanner IMPLEMENTATION.
 
     IF character EQ '"'.
       me->step_name = steps-end_value.
+      result = scan_result-continue.
+      RETURN.
+    ENDIF.
+
+    IF character EQ '\'.
+      me->step_name = steps-in_string_esc.
       result = scan_result-continue.
       RETURN.
     ENDIF.
@@ -629,12 +672,14 @@ CLASS scanner IMPLEMENTATION.
     IF character EQ '0'.
       me->step_name = steps-zero.
       result = scan_result-continue.
+      me->append_character( character = character ).
       RETURN.
     ENDIF.
 
     IF character CO '123456789'.
       me->step_name = steps-numeric.
       result = scan_result-continue.
+      me->append_character( character = character ).
       RETURN.
     ENDIF.
 
@@ -667,6 +712,7 @@ CLASS scanner IMPLEMENTATION.
     IF character CO '0123456789'.
       me->step_name = steps-numeric.
       result = scan_result-continue.
+      me->append_character( character ).
       RETURN.
     ENDIF.
 
@@ -822,7 +868,7 @@ CLASS scanner IMPLEMENTATION.
 
     IF character = 's'.
       me->append_character( character ).
-      me->step_name = steps-fal.
+      me->step_name = steps-fals.
       result = scan_result-continue.
       RETURN.
     ENDIF.
@@ -914,7 +960,7 @@ CLASS scanner IMPLEMENTATION.
         ASSIGN <json_element>-value TO <field>.
     ENDCASE.
 
-    CONCATENATE <field> character INTO <field>.
+    CONCATENATE <field> character INTO <field> RESPECTING BLANKS.
 
   ENDMETHOD.
 
@@ -959,11 +1005,9 @@ CLASS scanner IMPLEMENTATION.
 
   ENDMETHOD.
 
-
   METHOD initialize_json_elements.
     CREATE DATA json_element-children TYPE t_json_element.
   ENDMETHOD.
-
 
   METHOD append_json_element.
 
@@ -984,7 +1028,6 @@ CLASS scanner IMPLEMENTATION.
 
   ENDMETHOD.
 
-
   METHOD change_json_element_type.
     FIELD-SYMBOLS: <actual_element> TYPE json_element.
     IF me->actual_element IS NOT BOUND.
@@ -996,13 +1039,59 @@ CLASS scanner IMPLEMENTATION.
 
 
   METHOD pop_json_element.
+    DATA lv_lines TYPE i.
 
     IF lines( me->elements ) <= 1.
       RETURN.
     ENDIF.
 
-    READ TABLE me->elements INTO me->actual_element INDEX lines( me->elements ) - 1.
-    DELETE me->elements INDEX lines( me->elements ).
+    DATA: last_element_index TYPE i.
+
+    last_element_index = lines( me->elements ) - 1.
+    READ TABLE me->elements INTO me->actual_element INDEX last_element_index.
+    lv_lines = lines( me->elements ).
+    DELETE me->elements INDEX lv_lines.
+
+  ENDMETHOD.
+
+
+  METHOD get_actual_json_element.
+    FIELD-SYMBOLS: <actual_element> TYPE json_element.
+    IF me->actual_element IS NOT BOUND.
+      RETURN.
+    ENDIF.
+    ASSIGN: me->actual_element->* TO <actual_element>.
+    result = <actual_element>.
+  ENDMETHOD.
+
+  METHOD get_actual_json_element_type.
+    FIELD-SYMBOLS: <actual_element> TYPE json_element.
+    IF me->actual_element IS NOT BOUND.
+      RETURN.
+    ENDIF.
+    ASSIGN: me->actual_element->* TO <actual_element>.
+    result = <actual_element>-type.
+  ENDMETHOD.
+
+  METHOD in_string_esc.
+
+    CASE character.
+      WHEN 'b' OR
+           'f' OR
+           'n' OR
+           'r' OR
+           't' OR
+           '\' OR
+           '/' OR
+           '"'.
+        me->step_name = steps-in_string.
+        result = scan_result-continue.
+        RETURN.
+    ENDCASE.
+
+    result = me->gen_error(
+             character = character
+             context   = 'in string escape code' ).
 
   ENDMETHOD.
 
