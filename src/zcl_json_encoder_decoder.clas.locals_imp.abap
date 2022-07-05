@@ -239,9 +239,9 @@ CLASS scanner DEFINITION.
         IMPORTING character     TYPE c
         RETURNING VALUE(result) TYPE i,
 
-      append_character
+      append_string
         IMPORTING
-          character TYPE c,
+          value_to_append TYPE clike,
 
       create_json_element
         IMPORTING type          TYPE char1
@@ -271,7 +271,11 @@ CLASS scanner DEFINITION.
         RETURNING VALUE(result) TYPE scanner=>json_element,
 
       get_actual_json_element_type
-        RETURNING VALUE(result) TYPE char1.
+        RETURNING VALUE(result) TYPE char1,
+
+      process_string_value
+        IMPORTING
+            json type string.
 
 ENDCLASS.
 
@@ -304,6 +308,10 @@ CLASS scanner IMPLEMENTATION.
         me->clear_json_tree( ).
         result = me->error.
         RETURN.
+      ENDIF.
+
+      IF me->step_name EQ steps-in_string.
+        me->process_string_value( json ).
       ENDIF.
 
     ENDWHILE.
@@ -388,31 +396,31 @@ CLASS scanner IMPLEMENTATION.
         me->step_name = steps-neg.
         result = scan_result-begin_literal.
         me->change_json_element_type( type = json_element_type-attribute ).
-        me->append_character( character ).
+        me->append_string( character ).
         RETURN.
       WHEN '0'.
         me->step_name = steps-zero.
         result = scan_result-begin_literal.
         me->change_json_element_type( type = json_element_type-attribute ).
-        me->append_character( character ).
+        me->append_string( character ).
         RETURN.
       WHEN 't'.
         me->step_name = steps-t.
         result = scan_result-begin_literal.
         me->change_json_element_type( type = json_element_type-attribute ).
-        me->append_character( character ).
+        me->append_string( character ).
         RETURN.
       WHEN 'f'.
         me->step_name = steps-f.
         result = scan_result-begin_literal.
         me->change_json_element_type( type = json_element_type-attribute ).
-        me->append_character( character ).
+        me->append_string( character ).
         RETURN.
       WHEN 'n'.
         me->step_name = steps-n.
         result = scan_result-begin_literal.
         me->change_json_element_type( type = json_element_type-attribute ).
-        me->append_character( character ).
+        me->append_string( character ).
         RETURN.
     ENDCASE.
 
@@ -420,7 +428,7 @@ CLASS scanner IMPLEMENTATION.
       me->step_name = steps-numeric.
       result = scan_result-begin_literal.
       me->change_json_element_type( type = json_element_type-attribute ).
-      me->append_character( character ).
+      me->append_string( character ).
       RETURN.
     ENDIF.
 
@@ -645,7 +653,7 @@ CLASS scanner IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    me->append_character( character = character ).
+    me->append_string( value_to_append = character ).
 
     result = scan_result-continue.
 
@@ -672,14 +680,14 @@ CLASS scanner IMPLEMENTATION.
     IF character EQ '0'.
       me->step_name = steps-zero.
       result = scan_result-continue.
-      me->append_character( character = character ).
+      me->append_string( value_to_append = character ).
       RETURN.
     ENDIF.
 
     IF character CO '123456789'.
       me->step_name = steps-numeric.
       result = scan_result-continue.
-      me->append_character( character = character ).
+      me->append_string( value_to_append = character ).
       RETURN.
     ENDIF.
 
@@ -712,7 +720,7 @@ CLASS scanner IMPLEMENTATION.
     IF character CO '0123456789'.
       me->step_name = steps-numeric.
       result = scan_result-continue.
-      me->append_character( character ).
+      me->append_string( character ).
       RETURN.
     ENDIF.
 
@@ -791,7 +799,7 @@ CLASS scanner IMPLEMENTATION.
   METHOD t.
 
     IF character = 'r'.
-      me->append_character( character ).
+      me->append_string( character ).
       me->step_name = steps-tr.
       result = scan_result-continue.
       RETURN.
@@ -806,7 +814,7 @@ CLASS scanner IMPLEMENTATION.
   METHOD tr.
 
     IF character = 'u'.
-      me->append_character( character ).
+      me->append_string( character ).
       me->step_name = steps-tru.
       result = scan_result-continue.
       RETURN.
@@ -821,7 +829,7 @@ CLASS scanner IMPLEMENTATION.
   METHOD tru.
 
     IF character = 'e'.
-      me->append_character( character ).
+      me->append_string( character ).
       me->change_json_element_type( type = scanner=>json_element_type-special_value ).
       me->step_name = steps-end_value.
       result = scan_result-continue.
@@ -837,7 +845,7 @@ CLASS scanner IMPLEMENTATION.
   METHOD f.
 
     IF character = 'a'.
-      me->append_character( character ).
+      me->append_string( character ).
       me->step_name = steps-fa.
       result = scan_result-continue.
       RETURN.
@@ -852,7 +860,7 @@ CLASS scanner IMPLEMENTATION.
   METHOD fa.
 
     IF character = 'l'.
-      me->append_character( character ).
+      me->append_string( character ).
       me->step_name = steps-fal.
       result = scan_result-continue.
       RETURN.
@@ -867,7 +875,7 @@ CLASS scanner IMPLEMENTATION.
   METHOD fal.
 
     IF character = 's'.
-      me->append_character( character ).
+      me->append_string( character ).
       me->step_name = steps-fals.
       result = scan_result-continue.
       RETURN.
@@ -882,7 +890,7 @@ CLASS scanner IMPLEMENTATION.
   METHOD fals.
 
     IF character = 'e'.
-      me->append_character( character ).
+      me->append_string( character ).
       me->change_json_element_type( type = scanner=>json_element_type-special_value ).
       me->step_name = steps-end_value.
       result = scan_result-continue.
@@ -898,7 +906,7 @@ CLASS scanner IMPLEMENTATION.
   METHOD n.
 
     IF character = 'u'.
-      me->append_character( character ).
+      me->append_string( character ).
       me->step_name = steps-nu.
       result = scan_result-continue.
       RETURN.
@@ -913,7 +921,7 @@ CLASS scanner IMPLEMENTATION.
   METHOD nu.
 
     IF character = 'l'.
-      me->append_character( character ).
+      me->append_string( character ).
       me->step_name = steps-nul.
       result = scan_result-continue.
       RETURN.
@@ -928,7 +936,7 @@ CLASS scanner IMPLEMENTATION.
   METHOD nul.
 
     IF character = 'l'.
-      me->append_character( character ).
+      me->append_string( character ).
       me->change_json_element_type( type = scanner=>json_element_type-special_value ).
       me->step_name = steps-end_value.
       result = scan_result-continue.
@@ -941,7 +949,7 @@ CLASS scanner IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD append_character.
+  METHOD append_string.
 
     IF me->actual_element IS NOT BOUND.
       RETURN.
@@ -960,7 +968,7 @@ CLASS scanner IMPLEMENTATION.
         ASSIGN <json_element>-value TO <field>.
     ENDCASE.
 
-    CONCATENATE <field> character INTO <field> RESPECTING BLANKS.
+    CONCATENATE <field> value_to_append INTO <field> RESPECTING BLANKS.
 
   ENDMETHOD.
 
@@ -1092,6 +1100,34 @@ CLASS scanner IMPLEMENTATION.
     result = me->gen_error(
              character = character
              context   = 'in string escape code' ).
+
+  ENDMETHOD.
+
+  METHOD process_string_value.
+
+    DATA: value_substring TYPE string,
+          result_tab      TYPE match_result_tab,
+          lenght          TYPE i.
+
+    FIELD-SYMBOLS: <result> LIKE LINE OF result_tab.
+
+    FIND FIRST OCCURRENCE OF REGEX '"|\\' IN SECTION OFFSET me->no_characters_processed OF json RESULTS result_tab.
+
+    IF sy-subrc NE 0.
+      RETURN.
+    ENDIF.
+
+    READ TABLE result_tab ASSIGNING <result> INDEX 1.
+    IF sy-subrc NE 0.
+      RETURN.
+    ENDIF.
+
+    lenght = <result>-offset - me->no_characters_processed.
+
+    value_substring = json+me->no_characters_processed(lenght).
+    me->append_string( value_substring ).
+
+    me->no_characters_processed = <result>-offset.
 
   ENDMETHOD.
 
