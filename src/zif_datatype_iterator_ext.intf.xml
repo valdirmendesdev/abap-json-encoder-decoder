@@ -4,8 +4,8 @@
   <asx:values>
    <VSEOINTERF>
     <CLSNAME>ZIF_DATATYPE_ITERATOR_EXT</CLSNAME>
-    <LANGU>P</LANGU>
-    <DESCRIPT>Extensor para iteração na estrutura de um tipo de dados</DESCRIPT>
+    <LANGU>E</LANGU>
+    <DESCRIPT>Datatype iterator extension</DESCRIPT>
     <EXPOSURE>2</EXPOSURE>
     <STATE>1</STATE>
     <UNICODE>X</UNICODE>

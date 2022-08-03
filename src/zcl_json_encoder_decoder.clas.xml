@@ -4,7 +4,7 @@
   <asx:values>
    <VSEOCLASS>
     <CLSNAME>ZCL_JSON_ENCODER_DECODER</CLSNAME>
-    <LANGU>P</LANGU>
+    <LANGU>E</LANGU>
     <DESCRIPT>JSON encoder and decoder</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>

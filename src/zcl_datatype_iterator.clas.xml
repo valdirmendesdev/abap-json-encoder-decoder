@@ -4,8 +4,8 @@
   <asx:values>
    <VSEOCLASS>
     <CLSNAME>ZCL_DATATYPE_ITERATOR</CLSNAME>
-    <LANGU>P</LANGU>
-    <DESCRIPT>Itera na estrutura de um tipo de dados</DESCRIPT>
+    <LANGU>E</LANGU>
+    <DESCRIPT>Datatype iterator</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>

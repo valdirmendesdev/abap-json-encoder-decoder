@@ -4,8 +4,8 @@
   <asx:values>
    <VSEOCLASS>
     <CLSNAME>ZCL_JSON_CONFIG_GENERATOR</CLSNAME>
-    <LANGU>P</LANGU>
-    <DESCRIPT>Gera a estrutura de configuração por campo de um tipo</DESCRIPT>
+    <LANGU>E</LANGU>
+    <DESCRIPT>Generates the json settings for each field of a type</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>

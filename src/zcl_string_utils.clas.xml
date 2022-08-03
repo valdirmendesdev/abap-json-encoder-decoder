@@ -4,8 +4,8 @@
   <asx:values>
    <VSEOCLASS>
     <CLSNAME>ZCL_STRING_UTILS</CLSNAME>
-    <LANGU>P</LANGU>
-    <DESCRIPT>Utilitários para string</DESCRIPT>
+    <LANGU>E</LANGU>
+    <DESCRIPT>String utils</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>

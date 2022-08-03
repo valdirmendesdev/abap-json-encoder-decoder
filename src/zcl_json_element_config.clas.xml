@@ -4,8 +4,8 @@
   <asx:values>
    <VSEOCLASS>
     <CLSNAME>ZCL_JSON_ELEMENT_CONFIG</CLSNAME>
-    <LANGU>P</LANGU>
-    <DESCRIPT>Configuração de um elemento JSON</DESCRIPT>
+    <LANGU>E</LANGU>
+    <DESCRIPT>JSON settings for an element</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>
