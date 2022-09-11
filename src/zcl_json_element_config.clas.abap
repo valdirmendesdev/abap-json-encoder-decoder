@@ -36,6 +36,11 @@ CLASS zcl_json_element_config DEFINITION
 
       get_child_by_external_name
         IMPORTING external_name TYPE csequence
+        RETURNING VALUE(result) TYPE REF TO zcl_json_element_config,
+
+      change_ext_name_by_path
+        IMPORTING abap_name     TYPE csequence
+                  ext_name      TYPE csequence
         RETURNING VALUE(result) TYPE REF TO zcl_json_element_config.
 
   PROTECTED SECTION.
@@ -137,4 +142,16 @@ CLASS zcl_json_element_config IMPLEMENTATION.
     ENDIF.
 
   ENDMETHOD.
+
+  METHOD change_ext_name_by_path.
+
+    result = me->get_element_by_path( abap_name ).
+    IF result IS NOT BOUND.
+      RETURN.
+    ENDIF.
+
+    result->ext_name = ext_name.
+
+  ENDMETHOD.
+
 ENDCLASS.

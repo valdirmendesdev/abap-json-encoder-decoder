@@ -23,7 +23,8 @@ CLASS ltcl_json_element_config DEFINITION FINAL FOR TESTING
       deep_struct_element_by_path       FOR TESTING RAISING cx_static_check,
       non_existent_element_by_path      FOR TESTING RAISING cx_static_check,
       non_existent_element_in_struct    FOR TESTING RAISING cx_static_check,
-      get_child_by_external_name        FOR TESTING RAISING cx_static_check.
+      get_child_by_external_name        FOR TESTING RAISING cx_static_check,
+      set_external_name_by_path         FOR TESTING RAISING cx_static_check.
 
 ENDCLASS.
 
@@ -125,6 +126,25 @@ CLASS ltcl_json_element_config IMPLEMENTATION.
     element_config->ext_name    = 'name2'.
     cut->add_child( element_config ).
     cl_abap_unit_assert=>assert_bound( act = cut->get_child_by_external_name( 'name2' ) ).
+  ENDMETHOD.
+
+  METHOD set_external_name_by_path.
+
+    DATA(element_changed) = cut->change_ext_name_by_path( abap_name = 'name_1' ext_name = 'name1' ).
+    cl_abap_unit_assert=>assert_not_bound( act = element_changed ).
+
+    DATA(element_config) = NEW zcl_json_element_config( ).
+    element_config->abap_name = 'name_1'.
+    cut->add_child( element_config ).
+
+    element_config = NEW zcl_json_element_config( ).
+    element_config->abap_name   = 'NAME_2'.
+    cut->add_child( element_config ).
+
+    element_changed = cut->change_ext_name_by_path( abap_name = 'name_1' ext_name = 'name1' ).
+    cl_abap_unit_assert=>assert_bound( act = element_changed ).
+    cl_abap_unit_assert=>assert_equals( act = element_changed->ext_name exp = 'name1' ).
+
   ENDMETHOD.
 
 ENDCLASS.
